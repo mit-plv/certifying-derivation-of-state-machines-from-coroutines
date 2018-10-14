@@ -1,0 +1,5 @@
+-I src -R theories StateMachines
+src/g_plugin.ml4
+src/plugin.mlpack
+theories/Plugin.v
+theories/Defun.v
