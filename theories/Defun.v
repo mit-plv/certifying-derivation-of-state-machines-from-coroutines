@@ -148,12 +148,26 @@ Ltac pattern_rhs term :=
     set (x := X); pattern term in x; subst x
   end.
 
+
+Lemma equal_f : forall (A B : Type)(f g : A -> B) x,
+    f = g -> f x = g x.
+  intros.
+  congruence.
+Qed.
+
 Ltac unify_fun :=
   simpl;
   repeat curry_lhs;
-  match goal with
-    |- _ ?x = _ => pattern_rhs x; apply eq_refl
-  end.
+  let rec unify_fun_aux :=
+      match goal with
+        |- _ ?x = _ =>
+        pattern_rhs x;
+        apply equal_f;
+        apply eq_refl
+        || unify_fun_aux
+      end
+  in
+  unify_fun_aux.
 
 Ltac unify_to_subterm_im t1 t2 :=
   match t1 with
@@ -176,6 +190,19 @@ Ltac leftmost c :=
   | _ => c
   end.
 
+
+
+Ltac skip_to env nextptr :=
+  lazymatch goal with
+    |- @equiv ?state ?a ?step ?current ?prog =>
+    let ptr := open_constr:(?[ptr]) in
+    context_of current env ptr;
+    let step_f := ptr_to_step_f ptr in
+    let ty_env := type of env in
+    let f := open_constr:(_  : ty_env -> step_range state a ) in
+    eapply (@EquivStateSkip _ _ (step_f f) (ptr env)
+                            (fun _ => nextptr))
+  end.
 
 Ltac derive env :=
   lazymatch goal with
@@ -228,44 +255,39 @@ Ltac derive env :=
       | let m' := fresh "m'" in
         destruct m as [|m'];
         [ derive env0 | let envm' := env_subst env' m m' in derive envm' ]]
-    | _ => idtac
+    | _ =>
+      let p := leftmost prog in
+      tryif is_fix p then
+        (skip_to env open_constr:(_); [unify_fun|progress eauto])
+        || (
+            let f := open_constr:(_  : ty_env -> step_range state a ) in
+            let f' := open_constr:(_) in
+            let env' := (eval simpl in env) in
+            let m := match env' with (?k,_) => k | ?k => k end in
+            let env0 := env_subst env' m 0 in
+            eapply (@EquivStateSkip _ _ (step_f (f ||| f')) (ptr (inl env))
+                                    (fun _ => match m with
+                                              | O =>
+                                                ptr (inr (inl (inl env0)))
+                                              | S m' =>
+                                                ptr (inr (inr (inl _)))
+                                              end));
+            [ unify_fun
+            | let rec generalize_args e :=
+                  lazymatch e with
+                  | ?e' m => generalize_args e'
+                  | ?e' ?x => generalize dependent x; generalize_args e'
+                  | _ => idtac
+                  end
+              in
+              generalize_args prog;
+              induction m as [|m'];
+              intros;
+              [ derive env0 | let envm' := env_subst env' m m' in derive envm' ]
+            ]
+        )
+      else idtac
     end
-  end.
-
-Ltac induct env m :=
-  lazymatch goal with
-    |- @equiv ?state ?a ?step ?current ?prog =>
-    let ptr := open_constr:(?[ptr]) in
-    context_of current open_constr:(inl _) ptr;
-    let step_f := ptr_to_step_f ptr in
-    let ty_env := type of env in
-    let f := open_constr:(_  : ty_env -> step_range state a ) in
-    let f' := open_constr:(_) in
-    let env' := (eval simpl in env) in
-    let env0 := env_subst env' m 0 in
-    eapply (@EquivStateSkip _ _ (step_f (f ||| f')) (ptr (inl env))
-                            (fun _ => match m with
-                                      | O =>
-                                        ptr (inr (inl (inl env0)))
-                                      | S m' =>
-                                        ptr (inr (inr (inl _)))
-                                      end));
-    [ unify_fun
-    |
-    ]
-  end.
-
-
-Ltac refer env nextptr :=
-  lazymatch goal with
-    |- @equiv ?state ?a ?step ?current ?prog =>
-    let ptr := open_constr:(?[ptr]) in
-    context_of current env ptr;
-    let step_f := ptr_to_step_f ptr in
-    let ty_env := type of env in
-    let f := open_constr:(_  : ty_env -> step_range state a ) in
-    eapply (@EquivStateSkip _ _ (step_f f) (ptr env)
-                            (fun _ => nextptr))
   end.
 
 Definition ex : t effect unit :=
@@ -275,7 +297,8 @@ Definition ex : t effect unit :=
     put (n + n0 + n1);
     Pure _ tt.
 
-Goal {state & {init & {step | @equiv state _ step init ex }}}.
+Definition ex_derive :
+  {state & {init & {step | @equiv state _ step init ex }}}.
   unfold ex.
   repeat eexists.
   derive tt.
@@ -288,13 +311,15 @@ Definition ex4 :=
     | S n' => m <- get; put m; Pure _ tt
     end.
 
-Goal {state & {init & {step | @equiv state _ step init ex4}}}.
+Definition ex4_derive :
+  {state & {init & {step | @equiv state _ step init ex4}}}.
   unfold ex4.
   repeat eexists.
   derive tt.
 Defined.
 
-Goal {state & {init & { step | @equiv state _ step init ex1 }}}.
+Definition ex1_derive :
+  {state & {init & { step | @equiv state _ step init ex1 }}}.
   unfold ex1.
   repeat eexists.
   derive tt.
@@ -306,7 +331,8 @@ Definition ex2 : t effect unit :=
     put (n + m);
     Pure _ tt.
 
-Goal {state & {init & { step | @equiv state _ step init ex2 }}}.
+Definition ex2_derive :
+  {state & {init & { step | @equiv state _ step init ex2 }}}.
 Proof.
   unfold ex2.
   repeat eexists.
@@ -332,40 +358,16 @@ Fixpoint ex3' (a n : nat) : t effect unit :=
 Definition ex3 : t effect unit :=
   n <- get; ex3' 0 n.
 
-Lemma equal_f : forall (A B : Type)(f g : A -> B) x,
-    f = g -> f x = g x.
-  intros.
-  congruence.
-Qed.
 
-Goal {state & {step & forall n a, { init | @equiv state _ step init (ex3' a n) }}}.
+Definition ex3'_derive :
+  {state & {step & forall n a, { init | @equiv state _ step init (ex3' a n) }}}.
 Proof.
   unfold ex3'.
-  do 2 eexists.
-  intros.
-  eexists.
-  induct (n,a) n.
-  revert a.
-  induction n; intros.
-  - derive (0,a).
-    unfold prod_curry. simpl.
-    curry_lhs. pattern_rhs a.
-    apply equal_f.
-    pattern_rhs 0.
-    apply eq_refl.
-  - (* Show Existentials. *)
-    instantiate (1 := (m',a)).
-    derive (n,a).
-    refer (n0,(n,a))
-          open_constr:
-    (match n with
-     | O => inr (inl (inl (0,Nat.add n0 a)))
-     | S n' => inr (inr (inl (n',Nat.add n0 a)))
-    end).
-    unify_fun.
-    apply (IHn (Nat.add n0 a)).
-    Grab Existential Variables.
-    all:try exact (fun _:unit => tt).
-    exact (fun _:unit => None).
-    exact unit.
+  repeat eexists.
+  derive (n,a).
+  Grab Existential Variables.
+  all:try exact (fun _:unit => tt).
+  all:try exact (fun _:unit => None).
+  exact unit.
 Defined.
+
