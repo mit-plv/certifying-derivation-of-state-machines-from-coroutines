@@ -1,5 +1,5 @@
 Require Import List PeanoNat.
-Require Import StateMachines.Plugin.
+(*Require Import StateMachines.Plugin.*)
 Import ListNotations.
 Set Universe Polymorphism.
 
@@ -83,28 +83,6 @@ Ltac context_of_aux t1 t2 ctx result :=
 
 Ltac context_of t1 t2 result :=
   context_of_aux t1 t2 open_constr:(fun x => x) result.
-
-Ltac get_match env ptr env_f step_f :=
-  match goal with
-    |- @equiv ?state ?a ?step ?current
-              (Eff (getE tt)
-                   (fun n => match ?m with
-                             | O => ?progO
-                             | S m' => ?progS
-                             end)) =>
-    let ty_env := type of env in
-    eapply (@EquivEffGet _ _
-                         ((fun _ =>
-                            Some (existT _ _
-                                         (getE tt,
-                                          step_f (fun n:nat =>
-                                            match n with
-                                            | O => ptr (inr (inl (inl env)))
-                                            | S n' => ptr (inr (inr (inl (env_f n'))))
-                                            end)))) ||| _)
-                         (ptr (inl env)));
-    [simpl; apply eq_refl|]
-  end.
 
 Ltac ptr_to_step_f_aux ptr accum :=
   let ty := match type of ptr with
@@ -190,11 +168,9 @@ Ltac leftmost c :=
   | _ => c
   end.
 
-
-
 Ltac skip_to env nextptr :=
   lazymatch goal with
-    |- @equiv ?state ?a ?step ?current ?prog =>
+    |- @equiv ?state ?a ?step ?current _ =>
     let ptr := open_constr:(?[ptr]) in
     context_of current env ptr;
     let step_f := ptr_to_step_f ptr in
@@ -209,7 +185,6 @@ Ltac derive env :=
     |- @equiv ?state ?a ?step ?current ?prog =>
     let ptr := open_constr:(?[ptr]) in
     context_of current open_constr:(inl _) ptr;
-    let step_f := ptr_to_step_f ptr in
     let ty_env := type of env in
     lazymatch prog with
     | Eff (getE tt) _ =>
@@ -219,6 +194,7 @@ Ltac derive env :=
           | _ => open_constr:(fun n:nat => (n,env))
           end
       in
+      let step_f := ptr_to_step_f ptr in
       let f := open_constr:(_  : ty_env -> step_range state a ) in
       let f' := open_constr:(_) in
       eapply (@EquivEffGet _ _ (step_f (f ||| f')) (ptr (inl env))
@@ -227,6 +203,7 @@ Ltac derive env :=
        let n := fresh "n" in
        intro n; derive constr:(env_f' n)]
     | Eff (putE ?n) ?e =>
+      let step_f := ptr_to_step_f ptr in
       let f  := open_constr:(_ : ty_env -> step_range state a) in
       lazymatch e with
       | (fun _ => Pure _ _) =>
@@ -240,6 +217,7 @@ Ltac derive env :=
         [unify_fun|derive env]
       end
     | (match ?m with | O => ?progO | S _ => ?progS end) =>
+      let step_f := ptr_to_step_f ptr in
       let f := open_constr:(_  : ty_env -> step_range state a ) in
       let f' := open_constr:(_) in
       let env' := (eval simpl in env) in
@@ -257,9 +235,15 @@ Ltac derive env :=
         [ derive env0 | let envm' := env_subst env' m m' in derive envm' ]]
     | _ =>
       let p := leftmost prog in
-      tryif is_fix p then
-        (skip_to env open_constr:(_); [unify_fun|progress eauto])
-        || (
+     (* tryif is_fix p then*)
+        lazymatch goal with
+          _ : forall _, equiv _ _ _ |- _ =>
+          skip_to env open_constr:(ptr (inr env));
+          [unify_fun|
+           skip_to env open_constr:(_);
+           [unify_fun|auto]]
+        | _ =>
+          let step_f := ptr_to_step_f ptr in
             let f := open_constr:(_  : ty_env -> step_range state a ) in
             let f' := open_constr:(_) in
             let env' := (eval simpl in env) in
@@ -270,7 +254,7 @@ Ltac derive env :=
                                               | O =>
                                                 ptr (inr (inl (inl env0)))
                                               | S m' =>
-                                                ptr (inr (inr (inl _)))
+                                                ptr (inr (inr _))
                                               end));
             [ unify_fun
             | let rec generalize_args e :=
@@ -283,10 +267,10 @@ Ltac derive env :=
               generalize_args prog;
               induction m as [|m'];
               intros;
-              [ derive env0 | let envm' := env_subst env' m m' in derive envm' ]
+              [ derive env0 | let envm' := env_subst env' m m' in derive envm']
             ]
-        )
-      else idtac
+        end
+     (* else idtac*)
     end
   end.
 
@@ -304,6 +288,8 @@ Definition ex_derive :
   derive tt.
 Defined.
 
+Eval cbv [ex_derive proj1_sig projT2 sum_merge prod_curry] in proj1_sig (projT2 (projT2 ex_derive)).
+
 Definition ex4 :=
   n <- get;
     match n with
@@ -317,6 +303,8 @@ Definition ex4_derive :
   repeat eexists.
   derive tt.
 Defined.
+
+Eval cbv [ex4_derive proj1_sig projT2 sum_merge prod_curry] in proj1_sig (projT2 (projT2 ex4_derive)).
 
 Definition ex1_derive :
   {state & {init & { step | @equiv state _ step init ex1 }}}.
@@ -358,16 +346,15 @@ Fixpoint ex3' (a n : nat) : t effect unit :=
 Definition ex3 : t effect unit :=
   n <- get; ex3' 0 n.
 
-
 Definition ex3'_derive :
   {state & {step & forall n a, { init | @equiv state _ step init (ex3' a n) }}}.
 Proof.
   unfold ex3'.
   repeat eexists.
   derive (n,a).
-  Grab Existential Variables.
-  all:try exact (fun _:unit => tt).
-  all:try exact (fun _:unit => None).
-  exact unit.
 Defined.
 
+Eval cbv in projT1 ex3'_derive.
+
+Eval cbv [ex3'_derive projT1 projT2 sum_merge prod_curry] in
+    (projT1 (projT2 ex3'_derive)).
