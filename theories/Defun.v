@@ -159,7 +159,7 @@ Ltac env_subst env n m :=
   | (n,?x) => constr:((m,x))
   | (?k,?x) => let x' := env_subst x n m in
                constr:((k,x'))
-  | _ => constr:((m,env))
+  | _ => env
   end.
 
 Ltac leftmost c :=
@@ -178,6 +178,12 @@ Ltac skip_to env nextptr :=
     let f := open_constr:(_  : ty_env -> step_range state a ) in
     eapply (@EquivStateSkip _ _ (step_f f) (ptr env)
                             (fun _ => nextptr))
+  end.
+
+Ltac is_concr_nat n :=
+  match n with
+  | S ?n' => is_concr_nat n'
+  | O => idtac
   end.
 
 Ltac derive env :=
@@ -236,18 +242,16 @@ Ltac derive env :=
     | _ =>
       let p := leftmost prog in
      (* tryif is_fix p then*)
-        lazymatch goal with
-          _ : forall _, equiv _ _ _ |- _ =>
-          skip_to env open_constr:(ptr (inr env));
+        (  skip_to env open_constr:(ptr (inr env));
           [unify_fun|
            skip_to env open_constr:(_);
-           [unify_fun|auto]]
-        | _ =>
+           [unify_fun|progress auto]])
+        || (
           let step_f := ptr_to_step_f ptr in
             let f := open_constr:(_  : ty_env -> step_range state a ) in
             let f' := open_constr:(_) in
             let env' := (eval simpl in env) in
-            let m := match env' with (?k,_) => k | ?k => k end in
+            let m := match prog with _ ?k => k end in
             let env0 := env_subst env' m 0 in
             eapply (@EquivStateSkip _ _ (step_f (f ||| f')) (ptr (inl env))
                                     (fun _ => match m with
@@ -257,19 +261,35 @@ Ltac derive env :=
                                                 ptr (inr (inr _))
                                               end));
             [ unify_fun
-            | let rec generalize_args e :=
+            | let rec generalize_args e tac :=
                   lazymatch e with
-                  | ?e' m => generalize_args e'
-                  | ?e' ?x => generalize dependent x; generalize_args e'
-                  | _ => idtac
+                  | ?e' m => generalize_args e' tac
+                  | ?e' ?x =>
+                    tryif is_concr_nat x then
+                        let s := fresh "n" in
+                        generalize x at 1 as s;
+                        generalize_args e'
+                                        ltac:(fun env m' =>
+                                                intro s;
+                                                tac constr:((s,env)) m')
+                    else
+                      (generalize dependent x;
+                       generalize_args e' ltac:(fun env m' =>
+                                                  intro x;
+                                                  tac env m'))
+                  | _ =>
+                    let m' := fresh "n'" in
+                    induction m as [|m'];
+                    [ tac env0 0
+                    | tac env m'
+                    ]
                   end
               in
-              generalize_args prog;
-              induction m as [|m'];
-              intros;
-              [ derive env0 | let envm' := env_subst env' m m' in derive envm']
+              generalize_args prog ltac:(fun env m' =>
+                                           let envm' := env_subst env' m m' in
+                                           derive envm')
             ]
-        end
+        )
      (* else idtac*)
     end
   end.
@@ -280,52 +300,6 @@ Definition ex : t effect unit :=
     n1 <- get;
     put (n + n0 + n1);
     Pure _ tt.
-
-Definition ex_derive :
-  {state & {init & {step | @equiv state _ step init ex }}}.
-  unfold ex.
-  repeat eexists.
-  derive tt.
-Defined.
-
-Eval cbv [ex_derive proj1_sig projT2 sum_merge prod_curry] in proj1_sig (projT2 (projT2 ex_derive)).
-
-Definition ex4 :=
-  n <- get;
-    match n with
-    | O => put 0; put 1; Pure _ tt
-    | S n' => m <- get; put m; Pure _ tt
-    end.
-
-Definition ex4_derive :
-  {state & {init & {step | @equiv state _ step init ex4}}}.
-  unfold ex4.
-  repeat eexists.
-  derive tt.
-Defined.
-
-Eval cbv [ex4_derive proj1_sig projT2 sum_merge prod_curry] in proj1_sig (projT2 (projT2 ex4_derive)).
-
-Definition ex1_derive :
-  {state & {init & { step | @equiv state _ step init ex1 }}}.
-  unfold ex1.
-  repeat eexists.
-  derive tt.
-Defined.
-
-Definition ex2 : t effect unit :=
-  n <- get;
-    m <- get;
-    put (n + m);
-    Pure _ tt.
-
-Definition ex2_derive :
-  {state & {init & { step | @equiv state _ step init ex2 }}}.
-Proof.
-  unfold ex2.
-  repeat eexists.
-  derive tt.
-Defined.
 
 
 (*
@@ -344,13 +318,14 @@ Fixpoint ex3' (a n : nat) : t effect unit :=
   end.
 
 Definition ex3 : t effect unit :=
-  n <- get; ex3' 0 n.
+  n <- get; ex3' 5 n.
 
 Definition ex3'_derive :
-  {state & {step & forall n a, { init | @equiv state _ step init (ex3' a n) }}}.
+  {state & {step & forall a n, { init | @equiv state _ step init (ex3' a n) }}}.
 Proof.
   unfold ex3'.
   repeat eexists.
+
   derive (n,a).
 Defined.
 
@@ -358,3 +333,27 @@ Eval cbv in projT1 ex3'_derive.
 
 Eval cbv [ex3'_derive projT1 projT2 sum_merge prod_curry] in
     (projT1 (projT2 ex3'_derive)).
+
+Definition ex3'' : t effect unit :=
+  n <- get;
+    a <- get;
+    ex3' a n.
+
+Definition ex3''_derive :
+  {state & {step & {init | @equiv state _ step init ex3''}}}.
+Proof.
+  unfold ex3'',ex3'.
+  repeat eexists.
+
+  derive tt.
+Defined.
+
+Set Printing Evars.
+Definition ex3_derive :
+  {state & {step & {init | @equiv state _ step init ex3 }}}.
+Proof.
+  unfold ex3, ex3'.
+  repeat eexists.
+
+  derive tt.
+  simpl.
