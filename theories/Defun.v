@@ -1,4 +1,4 @@
-Require Import List PeanoNat.
+Require Import List PeanoNat Program.Basics.
 Require Import StateMachines.Plugin.
 Import ListNotations.
 Set Universe Polymorphism.
@@ -11,6 +11,14 @@ Definition sum_merge (A B C : Type)(f : A -> C)(g : B -> C)(x : sum A B) :=
   | inr b => g b
   end.
 
+Lemma apply_def : forall A B (f : A -> B)(x : A),
+    apply f x = f x.
+Proof.
+  auto.
+Qed.
+
+Opaque apply.
+
 Infix "|||" := sum_merge (at level 60).
 
 Inductive t (eff : Type -> Type) (a : Type) :=
@@ -19,25 +27,15 @@ Inductive t (eff : Type -> Type) (a : Type) :=
 
 Inductive effect : Type -> Type :=
 | getE : unit -> effect nat
-| putE : nat -> effect unit
-| skipE : forall T, unit -> effect T.
+| putE : nat -> effect unit.
 
+Inductive aux_effect : Type -> Type :=
+| bindE : forall T, T -> aux_effect T
+| skipE : unit -> aux_effect unit.
 
-Fixpoint seqt eff a (e1 : t eff unit) (e2 : t eff a) :=
-  match e1 with
-  | Pure _ _ => e2
-  | Eff ef prog => Eff ef (fun x => seqt (prog x) e2)
-  end.
-
-Fixpoint foreach eff a T (l : list T)(e : t eff a)(f : T -> t eff a -> t eff a) :=
-  match l with
-  | [] => e
-  | x::l' => f x (foreach l' e f)
-  end.
 
 Notation "n <- 'get' ; e" := (Eff (getE tt) (fun n => e)) (at level 100, right associativity).
 Notation "'put' n ; e" := (Eff (putE n) (fun _ => e)) (at level 100).
-Notation "'skip' ; e" := (Eff (skipE tt) (fun _ => e)) (at level 100).
 
 (*
 n <- get;
@@ -50,52 +48,190 @@ Definition ex1 : t effect unit:=
     Pure _ tt.
 
 Definition step_range (state : Type) :=
-  option {ty : Set & (effect ty * (ty -> state))%type }.
+  option {ty : Type & ((effect ty + aux_effect ty) * (ty -> state))%type }.
 
 Open Scope type_scope.
 
 Inductive equiv (state a : Type)(step : state -> step_range state) :
   state -> t effect a -> Prop :=
-| EquivEffGet :
-    forall (current : state)(f : nat -> state)(prog : nat -> t effect a),
+| EquivEff :
+    forall (current : state)(T : Type)(f : T -> state)(prog : T -> t effect a)(e : effect T),
       step current
-      = Some (existT _ _ (getE tt, f)) ->
-      (forall n : nat, equiv step (f n) (prog n)) ->
-      equiv step current (Eff (getE tt) prog)
-| EquivEffPut :
-    forall (current : state)(f : unit -> state)(prog : unit -> t effect a) n,
+      = Some (existT _ _ (inl e, f)) ->
+      (forall x : T, equiv step (f x) (prog x)) ->
+      equiv step current (Eff e prog)
+| EquivStateSkip :
+    forall (next : state)(current : state)(prog : t effect a),
       step current
-      = Some (existT _ _ (putE n, f)) ->
-      equiv step (f tt) (prog tt) ->
-      equiv step current (Eff (putE n) prog)
-| EquivEffSkip :
-    forall (current : state)(f : unit -> state)(prog : unit -> t effect a),
+      = Some (existT _ _ (inr (skipE tt), (fun _:unit => next))) ->
+      equiv step next prog ->
+      equiv step current prog
+| EquivBind :
+    forall(T : Type)(x0 : T)(f : T -> state)(current : state) prog ,
       step current
-      = Some (existT _ _ (skipE unit tt, f)) ->
-      equiv step (f tt) (prog tt) ->
-      equiv step current (Eff (skipE unit tt) prog)
+      = Some (existT _ _ (inr (bindE x0), f)) ->
+      equiv step (f x0) prog ->
+      equiv step current prog
 | EquivPure :
     forall (current : state)(x : a),
       step current = None ->
-      equiv step current (Pure _ x)
-| EquivGeneralize :
-    forall (current : state)(T : Type)(x0 : T)(f : T -> state)(e' : T -> t effect a) e,
-      step current
-      = Some (existT _ _ (skipE T tt, f)) ->
-      e' x0 = e ->
-      (forall x:T, equiv step (f x) (e' x)) ->
-      equiv step current e.
+      equiv step current (Pure _ x).
 
 
-Lemma EquivStateSkip :
-  forall state a (step : state -> step_range state) (current : state)(next : state)(e : t effect a),
-    step current
-    = Some (existT _ _ (skipE unit tt, (fun _:unit => next))) ->
-    equiv step next e ->
-    equiv step current e.
+Lemma get_derive :
+  forall state a step A ty_env (ptr : ty_env + (ty_env * nat + A) -> state)
+         (env : ty_env) (prog : nat -> t effect a),
+    step (apply ptr (inl env))
+    = Some (existT _ _ (inl (getE tt),
+                        fun n => apply (fun x => ptr (inr x)) (inl (env,n)))) ->
+    (forall n, equiv step (apply (fun x => ptr (inr x)) (inl (env,n))) (prog n)) ->
+    equiv step (apply ptr (inl env)) (n <- get; prog n).
 Proof.
   intros.
-  eapply (EquivGeneralize _ tt (fun _:unit => e)); eauto.
+  eapply EquivEff; eauto.
+Qed.
+
+Lemma put_derive :
+  forall state a step A ty_env (ptr : ty_env + (ty_env + A) -> state)
+         (env : ty_env) (prog : t effect a) n,
+    step (apply ptr (inl env))
+    = Some (existT _ _ (inl (putE n),
+                        fun _ => apply (fun x => ptr (inr x)) (inl env))) ->
+    equiv step (apply (fun x => ptr (inr x)) (inl env)) prog ->
+    equiv step (apply ptr (inl env)) (put n; prog).
+Proof.
+  intros.
+  eapply EquivEff; eauto.
+Qed.
+
+Lemma EquivGeneralize : forall state a (step : state -> step_range state)(T : Type)(x0 : T)(f : T -> state)(prog' : T -> t effect a) prog (current : state),
+    step current
+    = Some (existT _ _ (inr (bindE x0), f)) ->
+    prog' x0 = prog ->
+    (forall x : T, equiv step (f x) (prog' x)) ->
+    equiv step current prog.
+Proof.
+  intros.
+  eapply EquivBind.
+  apply H.
+  rewrite <- H0.
+  apply H1.
+Qed.
+
+
+(*
+Section ReadL.
+  Variable f : list nat -> t effect unit.
+  
+  Fixpoint readL n accum :=
+    match n with
+    | O => f accum
+    | S n' =>
+      x <- get;
+        readL n' (accum ++ [x])
+    end.
+*)
+Fixpoint readL (f : list nat -> t effect unit) accum n :=
+  match n with
+  | O => f accum
+  | S n' =>
+    x <- get;
+      readL f (accum ++ [x]) n'
+  end.
+
+Fixpoint printL (e : t effect unit) l :=
+  match l with
+  | [] => e
+  | x::l' =>
+    put x;
+      printL e l'
+  end.
+
+Notation "l <- 'read' n ; e" := (readL (fun l => e) [] n) (at level 100, right associativity).
+Notation "'print' l ; e" := (printL e l) (at level 100, right associativity).
+
+Definition eqf_not_const (A B : Type)(f : A -> B)(a : A)(b : B) :=
+  f a = b.
+
+Lemma read_derive :
+  forall state step A ty_env
+         (ptr : ty_env + ((ty_env * nat * list nat) + ((ty_env * list nat) + A)) -> state)
+         l0 n e env,
+    (forall (l :list nat) m,
+        step (apply (fun x => ptr (inr x)) (inl (env, m, l)))
+        = Some (existT _ _
+                       (inl (getE tt),
+                        fun x =>
+                          match m with
+                          | O => apply (fun x => ptr (inr (inr x)))
+                                       (inl (env, l++[x]))
+                          | S m' =>
+                            apply (fun x => ptr (inr x))
+                                  (inl (env, m', l++[x]))
+                          end))) ->
+    step (apply ptr (inl env))
+    = Some (existT _ _
+                   (inr (bindE n),
+                    fun m =>
+                      match m with
+                      | O => apply (fun x => ptr (inr (inr x)))
+                                   (inl (env, l0))
+                      | S m' =>
+                        apply (fun x => ptr (inr x)) (inl (env,m', l0))
+                      end)) ->
+    (forall l, @equiv state _ step (apply (fun x => ptr (inr (inr x))) (inl (env, l))) (e l)) ->
+    @equiv state _ step (apply ptr (inl env)) (readL e l0 n).
+Proof.
+  intros.
+  eapply EquivBind.
+  - apply H0.
+  - clear H0.
+    unfold readL.
+    revert l0.
+    induction n; intros.
+    + auto.
+    + eapply EquivEff.
+      rewrite H.
+      reflexivity.
+      intros. simpl.
+      apply (IHn (l0 ++ [x])).
+Qed.
+
+Lemma print_derive :
+  forall state step A ty_env
+         (ptr : ty_env + (ty_env * nat * list nat + (ty_env + A)) -> state)
+         l e env,
+    step (apply ptr (inl env))
+    = Some (existT _ _
+                   (inr (bindE l),
+                    fun l0 =>
+                      match l0 with
+                      | [] => apply (fun x => ptr (inr (inr x)))
+                                    (inl env)
+                      | n::l' => apply (fun x => ptr (inr x))
+                                       (inl (env,n,l'))
+                      end)) ->
+    (forall l0 n,
+        step (apply (fun x => ptr (inr x)) (inl (env,n,l0)))
+        = Some (existT _ _
+                       (inl (putE n),
+                        fun _ =>
+                          match l0 with
+                          | [] => apply (fun x => ptr (inr (inr x)))
+                                        (inl env)
+                          | n'::l' => apply (fun x => ptr (inr x))
+                                            (inl (env,n',l'))
+                          end))) ->
+    @equiv state _ step (apply (fun x => ptr (inr (inr x))) (inl env)) e ->
+    @equiv state _ step (apply ptr (inl env)) (printL e l).
+Proof.
+  intros.
+  unfold printL.
+  eapply EquivBind.
+  - eauto.
+  - clear H. induction l.
+    + eauto.
+    + eapply EquivEff; eauto.
 Qed.
 
 Ltac context_of_aux t1 t2 ctx result :=
@@ -149,6 +285,16 @@ Ltac curry_lhs :=
   end.
 
 
+Ltac make_env_f env x :=
+  let ty_x := type of x in
+  let rec aux env ctx :=
+      lazymatch env with
+      | x => constr:(fun x:ty_x => ctx x)
+      | (?env',x) => constr:(fun x:ty_x => ctx (env',x))
+      | (?env',?y) => aux env' open_constr:(fun e => ctx (e,y))
+      end
+  in
+  aux env open_constr:(fun x => x).
 
 Ltac pattern_rhs term :=
   match goal with
@@ -207,7 +353,7 @@ Ltac skip_to env nextptr :=
     let step_f := ptr_to_step_f ptr in
     let ty_env := type of env in
     let f := open_constr:(_  : ty_env -> step_range state) in
-    eapply (@EquivStateSkip _ _ (step_f f) (ptr env) nextptr)
+    eapply (@EquivStateSkip _ _ (step_f f) nextptr (ptr env))
   end.
 
 Ltac is_concr_nat n :=
@@ -216,111 +362,138 @@ Ltac is_concr_nat n :=
   | O => idtac
   end.
 
-Definition label (A : Type)(x : A) := True.
-
-Ltac set_label env :=
-  assert (label env) by (unfold label; auto).
-
-Ltac derive_step env :=
+Ltac unify_fun_nc :=
   lazymatch goal with
-    |- @equiv ?state ?a ?step ?current ?prog =>
-    let ptr := open_constr:(?[ptr]) in
-    context_of current open_constr:(inl _) ptr;
+    |- eqf_not_const ?f ?a ?b =>
+    unfold eqf_not_const;
+    match b with
+    | context[a] =>
+      pattern_rhs a; apply eq_refl
+    end
+  | _ => idtac
+  end.
+
+
+Ltac dest_sum :=
+  let e := open_constr:(_|||_) in
+  match goal with
+  | |- ?g (inl _) = _ => unify g e
+  | |- ?g (inr _) = _ => unify g e
+  end.
+
+Ltac dest_step :=
+  repeat match goal with
+           |- context[apply ?f _] => rewrite (apply_def f)
+         end;
+  simpl;
+  repeat (dest_sum; simpl);
+  unify_fun.
+
+Definition thm (A:Type)(H:A) := tt.
+
+Ltac derive_lemmas l := repeat
+  lazymatch l with
+  | [] => idtac
+  | thm ?H::?l' =>
+    try (eapply H; intros; try dest_step); derive_lemmas l'
+    (*
+    tryif
+      (tryif eapply H then
+          intros;
+          unify_fun_nc;
+          try dest_step
+        else
+          idtac)
+    then
+      derive_lemmas l'
+    else
+      (lazymatch goal with
+        |- equiv _ (apply ?ptr (inl ?env)) (_ ?m) =>
+        eapply (EquivGeneralize
+                  (x0 := m)
+                  (f := fun k =>
+                          apply (fun x => ptr (inr x)) (inl (env,k))))
+       end;
+       [ dest_step
+       | intros;
+         lazymatch goal with
+           |- _ ?x = _ =>
+           pattern_rhs x;
+           try apply eq_refl
+         | _ => idtac
+         end
+       | intros;
+         derive_lemmas (thm H::l')
+       ]
+      )*)
+  end.
+
+Ltac derive_step :=
+  lazymatch goal with
+    |- @equiv ?state ?a ?step (apply ?ptr (inl ?env)) ?prog =>
     let ty_env := type of env in
     lazymatch prog with
-    | Eff (getE tt) _ =>
-      let env_f' :=
-          lazymatch env with
-          | tt => open_constr:(fun n:nat => n)
-          | _ => open_constr:(fun n:nat => (env,n))
-          end
-      in
-      let step_f := ptr_to_step_f ptr in
-      let f := open_constr:(_  : ty_env -> step_range state) in
-      let f' := open_constr:(_) in
-      eapply (@EquivEffGet _ _ (step_f (f ||| f')) (ptr (inl env))
-                           (fun n => ptr (inr (inl (env_f' n)))));
-      [unify_fun
-      |let n := fresh "n" in
-       intro n;
-       set_label (env_f' n)
-      ]
-    | Eff (putE ?n) ?e =>
-      let step_f := ptr_to_step_f ptr in
-      let f  := open_constr:(_ : ty_env -> step_range state) in
-      lazymatch e with
-      | (fun _ => Pure _ _) =>
-        eapply (@EquivEffPut _ _ (step_f (f ||| (fun _ => None))) (ptr (inl env))
-                             (fun _ => ptr (inr env)));
-        [try unify_fun|eapply EquivPure; auto]
+      | (match ?m with | O => _ | S _ => _ end) =>
+        let env' := (eval simpl in env) in
+        let env0 := env_subst env' m 0 in
+        eapply (EquivStateSkip
+                  (next := match m with
+                           | O =>
+                             apply (fun x => ptr (inr (inl x))) (inl env0)
+                           | S m' =>
+                             apply (fun x => ptr (inr (inr x))) (@inl nat _ _)
+                           end));
+        [ dest_step
+        | destruct m
+        ]
       | _ =>
-        let f' := open_constr:(_) in
-        eapply (@EquivEffPut _ _ (step_f (f ||| f')) (ptr (inl env))
-                             (fun _ => ptr (inr (inl env))));
-        [ unify_fun
-        | assert (label env) by (unfold label; auto)
-        ]
-      end
-    | (match ?m with | O => ?progO | S _ => ?progS end) =>
-      let step_f := ptr_to_step_f ptr in
-      let f := open_constr:(_  : ty_env -> step_range state) in
-      let f' := open_constr:(_) in
-      let env' := (eval simpl in env) in
-      let env0 := env_subst env' m 0 in
-      eapply (@EquivStateSkip _ _ (step_f (f ||| f')) (ptr (inl env))
-                              (match m with
-                               | O =>
-                                 ptr (inr (inl (inl env0)))
-                               | S m' =>
-                                 ptr (inr (inr (@inl nat _ _)))
-                               end));
-      [ unify_fun
-      | let m' := fresh "m'" in
-        destruct m as [|m'];
-        [ assert (label env0) by (unfold label; auto)
-        | let envm' := env_subst env' m m' in
-          assert (label envm')
-        ]
-      ]
-    | _ =>
       let p := leftmost prog in
       tryif is_fix p then
-        (skip_to env open_constr:(ptr (inr env));
-         intros;
-         [ unify_fun
-         | skip_to env open_constr:(_);
-          intros;
-           [unify_fun|progress repeat match goal with H : _ |- _ => refine (H _) || eapply H end]])
+        (eapply EquivStateSkip;
+         [ dest_step
+         | progress repeat match goal with H : _ |- _ => refine (H _) || eapply H end])
         || (
-          let step_f := ptr_to_step_f ptr in
-          let f := open_constr:(_  : ty_env -> step_range state) in
-          let f' := open_constr:(_) in
           let env' := (eval simpl in env) in
           let m := match prog with _ ?k => k end in
-          let env0 := match type of m with
-                      | nat => env_subst env' m 0
-                      | list ?A => env_subst env' m (@nil A)
-                      end
-          in
+          let env_f' := make_env_f env' m in
+          let env_f := eval simpl in env_f' in
           let k := fresh in
-          let rec generalize_args e tac :=
+          let rec generalize_args e :=
               lazymatch e with
               | ?e' m =>
-                lazymatch p with
-                | context[m] =>
+                tryif
+                    lazymatch env' with
+                    | context[m] =>
+                      match p with context[m] => idtac end
+                    | _ => idtac end
+                then
                   match type of m with
                   | nat =>
-                    eapply (@EquivGeneralize _ _ (step_f (f ||| f')) (ptr (inl env)) _ m (fun k:nat => match m with
-                                                                                                       | O => ptr (inr (inl (inl (env0,k))))
-                                                                                                       | S m' => ptr (inr (inr (inl (_, k))))
-                                                                                                       end))
+                    eapply (EquivGeneralize
+                              (x0 := m)
+                              (f := fun k:nat =>
+                                      match m with
+                                      | O =>
+                                        apply (fun x => ptr (inr (inl x)))
+                                              (inl (env_f 0,k))
+                                      | S m' =>
+                                        apply (fun x => ptr (inr (inr x)))
+                                              (inl (env_f m', k))
+                                      end))
                   | list ?A =>
-                    eapply (@EquivGeneralize _ _ (step_f (f ||| f')) (ptr (inl env)) _ m (fun l:list nat => match m with
-                                                                                                            | [] => ptr (inr (inl (inl (env0,l))))
-                                                                                                            | a::l' => ptr (inr (inr (inl (_,l))))
-                                                                                                            end))
+                    eapply (EquivGeneralize
+                              (x0 := m)
+                              (f := fun l:list nat =>
+                                      match m with
+                                      | [] =>
+                                        apply (fun x => ptr (inr (inl x)))
+                                              (inl (env_f [],l))
+                                      | a::l' =>
+                                        apply (fun x => ptr (inr (inr x)))
+                                              (inl (env_f l',l))
+                                      end))
                   end;
-                  [ unify_fun
+                  [ dest_step
                   | match goal with
                       |- ?e ?x = ?f ?x =>
                       match eval pattern x in f with
@@ -330,19 +503,23 @@ Ltac derive_step env :=
                   | let m' := fresh m "n'" in
                     induction m as [|m'];
                     intro k;
-                    simpl;
-                    [ tac env0 0
-                    | tac env' m']
+                    simpl
                   ]
-                | _ =>
-                  generalize_args e' tac
-                end
+                else
+                  generalize_args e'
               | ?e' ?x =>
-                eapply (@EquivGeneralize _ _ (step_f (f ||| f')) (ptr (inl env)) _ x (fun k:nat => match m with
-                                                                                                   | O => ptr (inr (inl (inl (env0,k))))
-                                                                                                   | S m' => ptr (inr (inr (inl (_, k))))
-                                                                                                   end));
-                [ unify_fun
+                eapply (EquivGeneralize
+                          (x0 := x)
+                          (f := fun k:nat =>
+                                  match m with
+                                  | O =>
+                                    apply (fun y => ptr (inr (inl y)))
+                                          (inl (env_f 0,k))
+                                  | S m' =>
+                                    apply (fun y => ptr (inr (inr y)))
+                                          (inl (env_f m', k))
+                                  end));
+                [ dest_step
                 | generalize x;
                   intros;
                   lazymatch goal with
@@ -353,60 +530,53 @@ Ltac derive_step env :=
                   end
                 | let m' := fresh m "m'" in
                   induction m as [|m'];
-                  intro k;
-                  simpl;
-                  [ tac env0 0
-                  | tac env' m' ]
+                  intro k
                 ]
               | _ =>
                 match type of m with
                 | nat =>
-                  eapply (@EquivStateSkip _ _ (step_f (f ||| f')) (ptr (inl env)) (match m with
-                                                                                                     | O => ptr (inr (inl (inl (env0))))
-                                                                                                     | S m' => ptr (inr (inr (inl _)))
-                                                                                                     end))
+                  eapply (EquivStateSkip
+                            (next := match m with
+                                     | O => apply (fun x => ptr (inr (inl x)))
+                                                  (inl (env_f 0))
+                                     | S m' => apply (fun x => ptr (inr (inr x)))
+                                                     (inl (env_f m'))
+                                     end))
                 | list ?A =>
-                  eapply (@EquivStateSkip _ _ (step_f (f ||| f')) (ptr (inl env)) (match m with
-                                                                                                          | [] => ptr (inr (inl (inl env0)))
-                                                                                                          | x::l' => ptr (inr (inr (inl _)))
-                                                                                                          end))
+                  eapply (EquivStateSkip
+                            (next := match m with
+                                     | [] => apply (fun x => ptr (inr (inl x)))
+                                                   (inl (env_f []))
+                                     | x::l'=> apply (fun x => ptr (inr (inr x)))
+                                                     (inl (env_f l',x))
+                                     end))
                 end;
-                [ unify_fun
+                [ dest_step
                 | let m' := fresh "n'" in
                   match type of m with
                   | nat =>
-                    induction m as [|m'];
-                    [ assert (label env0) by (unfold label; auto)
-                    | let envm' := env_subst env' m m' in
-                      assert (label envm') by (unfold label; auto) ]
+                    induction m as [|m']
                   | list nat =>
                     let a := fresh "a" in
-                    induction m as [|a m'];
-                    [ assert (label env0) by (unfold label; auto)
-                    | let envm' := env_subst env' m m' in
-                      assert (label (envm',a)) by (unfold label; auto) ]
+                    induction m as [|a m']
                   end
                 ]
               end
           in
-          generalize_args prog ltac:(fun env m' =>
-                                         let envm' := env_subst env' m m' in
-                                         assert (label (envm',k)) by (unfold label; auto))
+          generalize_args prog
         )
      else idtac
+
     end
   end.
 
-Ltac derive' env :=
-  derive_step env;
-  repeat
-     match goal with
-       H : label ?e |- _ => clear H; derive_step e
-     end.
-
 Ltac derive env :=
   repeat eexists;
-  unshelve derive' env;
+  let e := open_constr:(apply (fun x => x) (inl env)) in
+  match goal with
+    |- equiv _ ?init _ => unify init e
+  end;
+  unshelve (repeat (derive_lemmas [thm get_derive; thm put_derive; thm EquivPure; thm print_derive; thm read_derive]; derive_step));
   try exact (fun _ => None); try exact unit.
 
 Definition ex : t effect unit :=
@@ -420,6 +590,7 @@ Definition ex_derive :
   {state & {step & {init | @equiv state _ step init ex}}}.
 Proof.
   unfold ex.
+  repeat eexists.
   derive tt.
 Defined.
 
@@ -486,13 +657,13 @@ Definition double_loop : t effect unit :=
   n <- get;
     (fix f m :=
        match m with
-       | O => put n; Pure _ tt
+       | O => put 0; Pure _ tt
        | S m' =>
          x <- get;
            (fix g k :=
               match k with
               | O => f m'
-              | S k' => put 1; g k'
+              | S k' => put n; g k'
               end) x
        end) n.
 
@@ -517,146 +688,8 @@ Definition ex_list_derive :
   {state & {step & forall l, {init | @equiv state _ step init (ex_list l)}}}.
 Proof.
   unfold ex_list.
-  repeat eexists.
   derive l.
 Defined.
-
-(*
-Section ReadL.
-  Variable f : list nat -> t effect unit.
-  
-  Fixpoint readL n accum :=
-    match n with
-    | O => f accum
-    | S n' =>
-      x <- get;
-        readL n' (accum ++ [x])
-    end.
-*)
-Fixpoint readL (f : list nat -> t effect unit) accum n :=
-  match n with
-  | O => f accum
-  | S n' =>
-    x <- get;
-      readL f (accum ++ [x]) n'
-  end.
-
-Fixpoint printL (e : t effect unit) l :=
-  match l with
-  | [] => e
-  | x::l' =>
-    put x;
-      printL e l'
-  end.
-
-Notation "l <- 'read' n ; e" := (readL (fun l => e) [] n) (at level 100, right associativity).
-Notation "'print' l ; e" := (printL e l) (at level 100, right associativity).
-
-
-Lemma read_derive : forall state step ptr next l0 n init e,
-    init = match n with
-           | O => next l0
-           | S n' => ptr l0 (S n')
-           end->
-    (forall l n, step (ptr l n)
-               = match n with
-                 | O =>  Some (existT _ _ (skipE unit tt, (fun _ => next l)))
-                 | S n' => Some (existT _ _ (getE tt, fun x =>
-                                                match n' with
-                                                | O => next (l++[x])
-                                                | S n'' => ptr (l++[x]) (S n'')
-                                                end))
-                 end) ->
-    (forall l, @equiv state _ step (next l) (e l)) ->
-    @equiv state _ step init (readL e l0 n).
-Proof.
-  intros.
-  subst.
-  unfold readL.
-  revert l0.
-  induction n; intros.
-  auto.
-  eapply EquivEffGet; auto.
-  rewrite (H0 l0 (S n)).
-  simpl.
-  reflexivity.
-  intros.
-  apply IHn.
-Qed.
-
-Lemma print_derive : forall state step ptr next l init e,
-    init = match l with
-           | [] => next
-           | _::_ => ptr l
-           end ->
-    (forall l, step (ptr l)
-               = match l with
-                 | [] =>  Some (existT _ _ (skipE unit tt, (fun _ => next)))
-                 | n::l' => Some (existT _ _ (putE n, fun x =>
-                                                match l' with
-                                                | [] => next
-                                                | _::_ => ptr l'
-                                                end))
-                 end) ->
-    @equiv state _ step next e ->
-    @equiv state _ step init (printL e l).
-Proof.
-  intros.
-  subst.
-  unfold printL.
-  induction l.
-  auto.
-  eapply EquivEffPut.
-  rewrite H0.
-  simpl. reflexivity.
-  apply IHl.
-Qed.
-
-Ltac read_derive env_f :=
-  lazymatch goal with
-    |- @equiv ?state ?a ?step ?current (readL _ _ ?n) =>
-    lazymatch type of (env_f n) with
-      ?ty_env =>
-      let ptr := open_constr:(?[ptr]) in
-      context_of current open_constr:(inl _) ptr;
-      let step_f := ptr_to_step_f ptr in
-      let f := open_constr:(_  : ty_env * list nat -> step_range state) in
-      let f' := open_constr:(_) in
-      let env' := eval simpl in (env_f n) in
-      skip_to env' open_constr:(_);
-      [ unify_fun
-      | eapply (@read_derive _ (step_f (_ ||| (f ||| f'))) (fun l n => ptr (inr (inl (env_f n, l))))
-                             (fun l => ptr (inr (inr (inl (env_f 0,l))))));
-        [ reflexivity
-        | intros; simpl; unify_fun
-        | intros
-        ]
-      ]
-    end
-  end.
-
-Ltac print_derive env_f :=
-  lazymatch goal with
-    |- @equiv ?state ?a ?step ?current (printL _ ?l) =>
-    lazymatch type of (env_f l) with
-      ?ty_env =>
-      let ptr := open_constr:(?[ptr]) in
-      context_of current open_constr:(inl _) ptr;
-      let step_f := ptr_to_step_f ptr in
-      let f := open_constr:(_  : ty_env -> step_range state) in
-      let f' := open_constr:(_) in
-      let env' := eval simpl in (env_f l) in
-      skip_to env' open_constr:(_);
-      [ unify_fun
-      | eapply (@print_derive _ (step_f (_ ||| (f ||| f'))) (fun l => ptr (inr (inl (env_f l))))
-                             (ptr (inr (inr (inl (env_f []))))));
-        [ reflexivity
-        | intros; simpl; try unify_fun
-        | intros
-        ]
-      ]
-    end
-  end.
 
 Definition ex_read_print :=
   n <- get;
@@ -669,17 +702,28 @@ Definition ex_read_print_derive :
   {state & {step & {init | @equiv state _ step init ex_read_print}}}.
 Proof.
   unfold ex_read_print.
-  repeat eexists.
-  derive_step tt.
-  read_derive (fun n:nat => n).
-  print_derive (fun l:list nat => (0,l)).
-  derive (0,@nil nat).
+  derive tt.
 Defined.
+
+Definition ex_read_print2 :=
+  n <- get;
+    l <- read n;
+    print l;
+    print l;
+    Pure _ tt.
+
+
+Definition ex_read_print2_derive :
+  {state & {step & {init | @equiv state _ step init ex_read_print2}}}.
+Proof.
+  unfold ex_read_print2.
+  derive tt.
+Defined.
+
 
 Parameter generateKey : unit -> list nat * list nat.
 Parameter open : list nat -> list nat -> list nat -> list nat.
 Parameter seal : list nat -> list nat -> list nat -> list nat.
-
 
 Fixpoint splitAt A n (l : list A) :=
   match n with
@@ -696,14 +740,16 @@ Fixpoint splitAt A n (l : list A) :=
 Definition handshake pk sk :=
   n <- get;
   m <- get;
-  let (ourEphemeralPublic,ourEphemeralSecret) := generateKey tt in
+  let ourEphemeralPublic := fst (generateKey tt) in
+  let ourEphemeralSecret := snd (generateKey tt) in
   print ourEphemeralPublic;
     theirEphemeralPublic <- read n;
     theirHandshakeSealed <- read m;
     let theirHandshake :=
         open theirHandshakeSealed theirEphemeralPublic ourEphemeralSecret
     in
-    let (theirPK,theirHandshakeRest) := splitAt n theirHandshake in
+    let theirPK := fst (splitAt n theirHandshake) in
+    let theirHandshakeRest := snd (splitAt n theirHandshake) in
     let hs := open theirHandshakeRest theirPK ourEphemeralSecret in
     let ourHandshake :=
         pk ++ seal (ourEphemeralPublic ++ theirEphemeralPublic) theirEphemeralPublic sk
@@ -714,52 +760,7 @@ Definition handshake pk sk :=
 Definition handshake_derive :
   {state & {step & forall pk sk, {init | @equiv state _ step init  (handshake pk sk)}}}.
 Proof.
-  repeat eexists.
   unfold handshake.
-  destruct  (generateKey tt).
-  derive_step (pk,sk).
-  clear H.
-  derive_step (pk,sk,n).
-  clear H.
-  eapply (@EquivGeneralize _ _ _ (inr (inr (inl (pk,sk,n,n0)))) _ l (fun l => inr (inr (inr (inl (pk,sk,n,n0,l)))))).
-  simpl.
-  match goal with
-    |- ?step _ = _ =>
-    let e := open_constr:(_|||_) in
-    unify step e
-  end.
-  simpl.
-  unify_fun.
-  pattern_rhs l.
-  apply eq_refl.
-  intros.
-  simpl.
-  print_derive (fun l :list nat => (pk,sk,n,n0,l)).
-  read_derive (fun n:nat => (pk,sk,n,n0,@nil nat)).
-  read_derive (fun n:nat => (pk,sk,0,n,@nil nat,l1)).
-  destruct (splitAt n (open l2 l1 l0)).
-  remember (seal (pk ++ seal (x ++ l1) l1 sk) l3 l0) as l5.
-  eapply (@EquivGeneralize _ _ _ _ _ l5 (fun l5 => inr (inr (inr (inr (inr (inr (inr (inr (inr (inr (inl (pk,sk,0,0,[],l1,l2,l5))))))))))))).
-  simpl.
-  match goal with
-    |- ?step _ = _ =>
-    let e := open_constr:(_|||_) in
-    unify step e
-  end.
-  simpl.
-  unify_fun.
-  pattern_rhs l5.
-  apply eq_refl.
-  simpl.
-  intros.
-  print_derive (fun l:list nat => (pk,sk,0,0,@nil nat,l1,l2,l)).
-  eapply EquivPure.
-  simpl.
-  let e := open_constr:(fun _ => None) in
-  match goal with
-    |- ?g _ = _ => unify g e
-  end.
-  reflexivity.
-  Grab Existential Variables.
-  exact unit.
+  repeat eexists.
+  derive (pk,sk).
 Defined.
