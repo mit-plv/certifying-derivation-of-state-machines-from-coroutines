@@ -1,4 +1,4 @@
-Require Import List PeanoNat Program.Basics.
+Require Import List PeanoNat Program.Basics FunctionalExtensionality.
 Require Import StateMachines.Plugin.
 Import ListNotations.
 Set Universe Polymorphism.
@@ -149,9 +149,6 @@ Fixpoint printL (e : t effect unit) l :=
 
 Notation "l <- 'read' n ; e" := (readL (fun l => e) [] n) (at level 100, right associativity).
 Notation "'print' l ; e" := (printL e l) (at level 100, right associativity).
-
-Definition eqf_not_const (A B : Type)(f : A -> B)(a : A)(b : B) :=
-  f a = b.
 
 Lemma read_derive :
   forall state step A ty_env
@@ -362,18 +359,6 @@ Ltac is_concr_nat n :=
   | O => idtac
   end.
 
-Ltac unify_fun_nc :=
-  lazymatch goal with
-    |- eqf_not_const ?f ?a ?b =>
-    unfold eqf_not_const;
-    match b with
-    | context[a] =>
-      pattern_rhs a; apply eq_refl
-    end
-  | _ => idtac
-  end.
-
-
 Ltac dest_sum :=
   let e := open_constr:(_|||_) in
   match goal with
@@ -396,36 +381,6 @@ Ltac derive_lemmas l := repeat
   | [] => idtac
   | thm ?H::?l' =>
     try (eapply H; intros; try dest_step); derive_lemmas l'
-    (*
-    tryif
-      (tryif eapply H then
-          intros;
-          unify_fun_nc;
-          try dest_step
-        else
-          idtac)
-    then
-      derive_lemmas l'
-    else
-      (lazymatch goal with
-        |- equiv _ (apply ?ptr (inl ?env)) (_ ?m) =>
-        eapply (EquivGeneralize
-                  (x0 := m)
-                  (f := fun k =>
-                          apply (fun x => ptr (inr x)) (inl (env,k))))
-       end;
-       [ dest_step
-       | intros;
-         lazymatch goal with
-           |- _ ?x = _ =>
-           pattern_rhs x;
-           try apply eq_refl
-         | _ => idtac
-         end
-       | intros;
-         derive_lemmas (thm H::l')
-       ]
-      )*)
   end.
 
 Ltac derive_step :=
@@ -446,6 +401,8 @@ Ltac derive_step :=
         [ dest_step
         | destruct m
         ]
+      | let (_,_) := ?z in _ =>
+        replace z with (fst z, snd z) by (destruct z; auto)
       | _ =>
       let p := leftmost prog in
       tryif is_fix p then
@@ -737,19 +694,185 @@ Fixpoint splitAt A n (l : list A) :=
     end
   end.
 
+Definition ex_prod :=
+  n <- get;
+    l <- read n;
+    let (l0,l1) := splitAt (Nat.div2 n) l in
+    print l0;
+      Pure _ tt.
+
+Definition ex_prod_derive :
+  {state & {step & {init | @equiv state _ step init ex_prod}}}.
+Proof.
+  unfold ex_prod.
+  derive tt.
+Defined.
+
+Require String.
+Open Scope string_scope.
+
+Fixpoint simulatorS (n:nat) state (step : state -> step_range state)(init : state)(input : list nat)(accum : list nat) : list nat + String.string :=
+    match n with
+  | 0 => inr "not enough fuel"
+  | S n' =>
+      match step init with
+      | Some (existT _ x ((e, next) as p)) =>
+          match e with
+          | inl e0 =>
+              match
+                e0 in (effect T)
+                return
+                  ((effect T + aux_effect T) * (T -> state) ->
+                   (T -> state) -> list nat + String.string)
+              with
+              | getE _ =>
+                  fun (_ : (effect nat + aux_effect nat) * (nat -> state))
+                    (next0 : nat -> state) =>
+                  match input with
+                  | [] => inr "not enough input"
+                  | n0 :: input0 => simulatorS n' step (next0 n0) input0 accum
+                  end
+              | putE n0 =>
+                  fun (_ : (effect unit + aux_effect unit) * (unit -> state))
+                    (next0 : unit -> state) =>
+                  simulatorS n' step (next0 tt) input (n0 :: accum)
+              end p next
+          | inr a =>
+              match
+                a in (aux_effect T)
+                return
+                  ((effect T + aux_effect T) * (T -> state) ->
+                   (T -> state) -> list nat + String.string)
+              with
+              | @bindE T t0 =>
+                  fun (_ : (effect T + aux_effect T) * (T -> state))
+                    (next0 : T -> state) =>
+                  simulatorS n' step (next0 t0) input accum
+              | skipE _ =>
+                  fun (_ : (effect unit + aux_effect unit) * (unit -> state))
+                    (next0 : unit -> state) =>
+                  simulatorS n' step (next0 tt) input accum
+              end p next
+          end
+      | None => inl accum
+      end
+  end.
+
+Fixpoint simulatorE (e : t effect unit)(input accum : list nat) :=
+  match e with
+  | Pure _ _ => inl accum
+  | Eff (getE _) prog =>
+    match input with
+    | [] => inr "not enough input"
+    | n::rest => simulatorE (prog n) rest accum
+    end
+  | Eff (putE n) prog =>
+    simulatorE (prog tt) input (n::accum)
+  end.
+
+Definition equiv' state (step : state -> step_range state) init prog :=
+  forall input, exists fuel,
+      simulatorS fuel step init input [] = simulatorE prog input [].
+
+Theorem equiv_equiv' : forall state (step : state -> step_range state) init prog,
+    equiv step init prog -> equiv' step init prog.
+Proof.
+  unfold equiv'.
+  intros.
+  generalize (@nil nat) as accum.
+  revert input.
+  induction H; intros.
+  - destruct e.
+    + destruct input.
+      * exists 1.
+        simpl.
+        rewrite H.
+        reflexivity.
+      * destruct (H1 n input accum).
+        exists (S x).
+        simpl.
+        rewrite H.
+        auto.
+    + destruct (H1 tt input (n::accum)).
+      exists (S x).
+      simpl.
+      rewrite H.
+      auto.
+  - destruct (IHequiv input accum).
+    exists (S x).
+    simpl.
+    rewrite H.
+    auto.
+  - destruct (IHequiv input accum).
+    exists (S x).
+    simpl.
+    rewrite H.
+    auto.
+  - exists 1.
+    simpl.
+    rewrite H.
+    auto.
+Qed.
+
+
+Theorem equiv'_equiv : forall state (step : state -> step_range state) init prog,
+    equiv' step init prog -> equiv step init prog.
+Proof.
+  unfold equiv'.
+  generalize (@nil nat) as accum.
+  intros.
+  revert init accum H.
+  induction prog; intros.
+  - destruct (H []).
+    clear H.
+    revert init accum H0.
+    simpl.
+    induction x; simpl; intros.
+    + discriminate.
+    + destruct (step init) eqn:?.
+      * destruct s,p.
+        destruct s.
+        destruct e.
+        discriminate.
+        admit.
+        destruct a0.
+        -- eapply EquivBind.
+           apply Heqs.
+           eapply IHx.
+           eauto.
+        -- replace s0 with (fun _:unit => s0 tt) in Heqs.
+           eapply EquivStateSkip.
+           destruct u.
+           rewrite Heqs.
+           reflexivity.
+           eapply IHx.
+           destruct u. apply H0.
+           extensionality v. destruct v. auto.
+      * apply EquivPure. auto.
+  - destruct e.
+    + simpl in H0. destruct u.
+      eapply EquivEff.
+      all: swap 1 2.
+      intros.
+      eapply H.
+      intros.
+      destruct (H0 (x::input)).
+      admit.
+      admit.
+    + admit.
+Admitted.
+
 Definition handshake pk sk :=
   n <- get;
   m <- get;
-  let ourEphemeralPublic := fst (generateKey tt) in
-  let ourEphemeralSecret := snd (generateKey tt) in
+  let (ourEphemeralPublic,ourEphemeralSecret) := generateKey tt in
   print ourEphemeralPublic;
     theirEphemeralPublic <- read n;
     theirHandshakeSealed <- read m;
     let theirHandshake :=
         open theirHandshakeSealed theirEphemeralPublic ourEphemeralSecret
     in
-    let theirPK := fst (splitAt n theirHandshake) in
-    let theirHandshakeRest := snd (splitAt n theirHandshake) in
+    let (theirPK,theirHandshakeRest) := splitAt n theirHandshake in
     let hs := open theirHandshakeRest theirPK ourEphemeralSecret in
     let ourHandshake :=
         pk ++ seal (ourEphemeralPublic ++ theirEphemeralPublic) theirEphemeralPublic sk
@@ -764,3 +887,22 @@ Proof.
   repeat eexists.
   derive (pk,sk).
 Defined.
+
+Eval cbv [handshake_derive handshake projT2 projT1] in projT1 handshake_derive.
+
+Definition handshake_step :=
+  Eval cbv [handshake_derive handshake projT2 projT1 sum_merge prod_curry] in projT1 (projT2 handshake_derive).
+
+Require Import Extraction.
+
+Extraction Language Haskell.
+
+Extract Inductive unit => "()" [ "()" ].
+Extract Inductive list => "([])" ["[]" "(:)"].
+Extract Inductive bool => "Bool" ["True" "False"].
+Extract Inductive prod => "(,)"  [ "(,)" ].
+Extract Inductive sum => "Either" ["Left" "Right"].
+Extract Inductive option => "Maybe" ["Just" "Nothing"].
+Extract Inductive nat => Int ["0" "succ"] "(\fO fS n -> if n == 0 then fO () els e fS (n-1))".
+
+Extraction "Handshake.hs" handshake_step.
