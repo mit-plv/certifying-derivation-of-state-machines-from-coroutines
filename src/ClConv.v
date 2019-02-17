@@ -65,11 +65,17 @@ Inductive equiv (state a : Type)(step : state -> step_range state) :
       equiv step current (Pure _ x).
 
 Ltac mem x__ env :=
-  lazymatch env with
-  | x__ => true
-  | (?env',x__) => true
-  | (?env',_) => mem x__ env'
-  | _ => false
+  lazymatch x__ with
+  | O => false
+  | S _ => false
+  | tt => false
+  | _ =>
+    lazymatch env with
+    | x__ => true
+    | (?env',x__) => true
+    | (?env',_) => mem x__ env'
+    | _ => false
+    end
   end.
 
 Class reify_cls (A : Type)(x : A) := do_reify : A.
@@ -135,43 +141,6 @@ Ltac remove a t :=
     constr:((v,x))
   end.
 
-Ltac step_next enext prog env :=
-  lazymatch goal with
-  | |- @equiv ?state ?a ?step (apply ?ptr (inl _)) _ =>
-    lazymatch type of prog with
-      ?ty -> _ =>
-      let h := fresh "h" in
-      set (h := inhabitat : ty);
-      let p := (eval simpl in (prog h)) in
-      lazymatch p with
-      | Pure _ _ =>
-        let e := open_constr:(fun _:ty => ptr (inr tt)) in
-        unify enext e
-      | Eff ?e ?prog' =>
-        let env' := free_var p env in
-        let env'' := free_var p h in
-        let b := mem h env'' in
-        lazymatch b with
-        | true =>
-          let e := open_constr:(fun h:ty => apply (fun x => ptr (inr x)) (inl (env',h))) in
-          unify enext e
-        | false =>
-          let e := open_constr:(fun _:ty => apply (fun x => ptr (inr x)) (inl env')) in
-          unify enext e
-        end
-      | match ?m with O => _ | S m' => _ end =>
-        lazymatch m with
-        | h =>
-          let e := open_constr:(fun k:ty => match k return state with O => apply (fun x => ptr (inr (inl x))) _ | S k' => apply (fun x => ptr (inr (inr x))) _ end) in
-          unify enext e
-        | _ =>
-          let e := open_constr:(match m return ty -> state with O => _ | S m' => _ m' end) in
-          unify enext e
-        end
-      end
-    end
-  end.
-
 Ltac curry_lhs :=
   lazymatch goal with
     |- ?x = _ =>
@@ -215,34 +184,96 @@ Ltac unify_fun :=
   in
   unify_fun_aux.
 
-Ltac fill_step :=
+Ltac dest_sum :=
+  match goal with
+  | |- ?g (inl _) = _ =>
+    let ty := type of g in
+    let e := open_constr:((_|||_): ty) in
+    unify g e
+  | |- ?g (inr _) = _ =>
+    let ty := type of g in
+    let e := open_constr:((_|||_): ty) in
+    unify g e
+  end.
+
+Ltac dest_step :=
+  repeat match goal with
+           |- context[apply ?f _] => rewrite (apply_def f)
+         end;
+  simpl;
+  repeat (dest_sum; simpl);
+  unify_fun.
+
+
+Ltac next_ptr state :=
+  lazymatch state with
+  | ?A + (?B + ?T) =>
+    let f := next_ptr T in
+    open_constr:(fun x => @inr A _ (@inr B _ (f x)))
+  | ?A + ?B => open_constr:(fun x => @inr A B x)
+  | ?A => open_constr:(fun x:A => x)
+  end.
+
+Ltac derive' env :=
   lazymatch goal with
-  | |- @equiv ?state ?a ?step ?init ?p =>
+  | |- @equiv ?state ?a ?step ?current ?p =>
     lazymatch p with
     | Pure _ _ =>
-      eapply EquivPure;
-      unfold sum_merge; rewrite apply_def;
-      unify_fun
+      lazymatch current with
+      | apply _ _ => idtac
+      | ?f _ =>
+        let ptr := next_ptr state in
+        let e := open_constr:(fun _ => ptr (inl tt)) in
+        unify f e;
+        eapply EquivPure;
+        dest_step
+      end
     | Eff ?e ?prog =>
-      lazymatch init with
-      | apply ?ptr (inl ?env) =>
-        let r := (eval simpl in (step (ptr (inl env)))) in
-        lazymatch r with
-        | ?f (inl _) =>
-          let splitted := open_constr:(_ ||| _) in
-          unify f splitted
-        | _ => idtac
-        end;
-        let enext := open_constr:(_) in
-        step_next enext prog env;
-        eapply (EquivEff _ (next := enext));
-        [ unfold sum_merge; rewrite apply_def; simpl; unify_fun | intros]
+      lazymatch current with
+      | inl _ =>
+        eapply EquivEff;
+        [ dest_step | intros; derive' env ]
+      | ?f ?prev =>
+        let ptr := next_ptr state in
+        let env' := free_var p (env,prev) in
+        let b := mem prev env' in
+        let ty := type of prev in
+        lazymatch b with
+        | true =>
+          let e := open_constr:(fun x:ty => ptr (inl (env,x))) in
+          let e' := (eval simpl in e) in
+          unify f e;
+          eapply EquivEff;
+          [ dest_step
+          | intros;
+            derive' env]
+        | false =>
+          let e := open_constr:(fun _:ty => ptr (inl env)) in
+          let e' := (eval simpl in e) in
+          unify f e';
+          let ty := type of f in
+          idtac ty;
+          eapply EquivEff;
+          [ dest_step
+          | intros; derive' env ]
+        end
+      end
+    | match ?m with O => _ | S m' => _ end =>
+      lazymatch current with
+      | ?f ?prev =>
+        let x' := fresh in
+        let ty := type of prev in
+        let e :=
+            lazymatch prev with
+            | m => open_constr:(fun x => match x with O => _ | S x' => _ end)
+            | _ => open_constr:(match m return ty -> state with O => _ | S x' => _ end)
+            end
+        in
+        unify f e;
+        destruct m
       end
     end
   end.
-
-
-
 Definition ex1 : t effect unit:=
   n <- get;
     put n;
@@ -254,30 +285,31 @@ Proof.
   do 2 eexists.
   eexists ?[init].
   unfold ex1.
-  let e := open_constr:(apply (fun x => x) (inl tt)) in
+  let e := open_constr:(inl tt) in
   unify ?init e.
-  fill_step.
-  fill_step.
-  fill_step.
-  fill_step.
+  derive' tt.
+  Grab Existential Variables.
+  all: exact unit || exact (fun _ => None).
 Defined.
 
-Eval cbv [ex1_derive ex1 sum_merge projT2 projT1] in (projT1 ex1_derive).
+Eval cbv [ex1_derive ex1 sum_merge projT2 projT1] in projT1 (projT2 ex1_derive).
 
 
-(*
 Goal {state & {step & {init | @equiv state _ step init
                                      (n <- get;
-                                        match n with
+                                        m <- get;
+                                        match m with
                                         | O => put 0; Pure _ tt
-                                        | S n' => put n'; Pure _ tt
+                                        | S _ => put 1; Pure _ tt
                                         end)}}}.
 Proof.
   do 2 eexists.
   eexists ?[init].
-  let e := open_constr:(apply (fun x => x) (inl tt)) in
+  let e := open_constr:(inl tt) in
   unify ?init e.
-  fill_step.
-  destruct x.
-  fill_step.
-*)
+  derive' tt.
+  derive' tt.
+  derive' tt.
+  Grab Existential Variables.
+  all: exact unit || exact (fun _ => None).
+Defined.
