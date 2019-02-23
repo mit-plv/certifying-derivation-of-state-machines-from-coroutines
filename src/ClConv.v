@@ -67,7 +67,6 @@ Inductive equiv (state a : Type)(step : state -> step_range state) :
 Ltac mem x__ env :=
   lazymatch x__ with
   | O => false
-  | S _ => false
   | tt => false
   | _ =>
     lazymatch env with
@@ -145,8 +144,6 @@ Ltac free_var exp env :=
     end
   end.
 
-Print app.
-
 Ltac remove a t :=
   lazymatch t with
   | (?t',a) => t'
@@ -200,9 +197,9 @@ Ltac unify_fun :=
 
 Ltac dest_sum :=
   match goal with
-  | |- ?g (inl _) = _ =>
-    let ty := type of g in
-    let e := open_constr:((_|||_): ty) in
+  | |- ?g (@inl ?A ?B _) = ?t =>
+    let T := type of t in
+    let e := open_constr:((_|||_): A + B -> T) in
     unify g e
   | |- ?g (inr _) = _ =>
     let ty := type of g in
@@ -247,16 +244,6 @@ Ltac derive' env :=
       | inl _ =>
         eapply EquivEff;
         [ dest_step | intros; derive' env ]
-      | ?f ?prev0 ?prev =>
-        let ptr := next_ptr state in
-        let ty := type of prev in
-        let e := open_constr:(fun x0 x :ty => ptr (inl (env,x0,x))) in
-        let e' := (eval simpl in e) in
-        unify f e;
-        simpl;
-        eapply EquivEff;
-        [ dest_step
-        | intros ]
       | ?f ?prev =>
         let ptr := next_ptr state in
         let env' := free_var p (env,prev) in
@@ -266,7 +253,7 @@ Ltac derive' env :=
         | true =>
           let e := open_constr:(fun x:ty => ptr (inl (env,x))) in
           let e' := (eval simpl in e) in
-          unify f e;
+          unify f e';
           eapply EquivEff;
           [ dest_step
           | intros;
@@ -287,8 +274,8 @@ Ltac derive' env :=
         let ty := type of prev in
         let e :=
             lazymatch prev with
-            | m => open_constr:(fun x => match x return state with O => _ O | S x' => _ x end)
-            | _ => open_constr:(match m return ty -> state with O => _ | S x' => _ end)
+            | m => open_constr:(fun x => match x return state with O => _ O | S x' => _ x' end)
+            | _ => open_constr:(match m return ty -> state with O => _ | S m' => _ end)
             end
         in
         unify f e;
@@ -303,7 +290,8 @@ Ltac derive' env :=
           let x' := fresh "x" in
           let e :=
               lazymatch prev with
-              | m => open_constr:(fun x => match x return state with O => _ x | S x' => _ x' x end)
+              | m => open_constr:(fun x => match x return state with O => _ x | S x' => _ x end)
+              | _ => open_constr:(match m return ty -> state with O => _ | S m' => _ end)
               end
           in
           unify f e;
@@ -349,9 +337,9 @@ Eval cbv [ex1_derive ex1 sum_merge projT2 projT1] in projT1 (projT2 ex1_derive).
 Goal {state & {step & {init | @equiv state _ step init
                                      (n <- get;
                                         m <- get;
-                                        match m with
+                                        match n with
                                         | O => put 0; Pure _ tt
-                                        | S _ => put 1; Pure _ tt
+                                        | S n' => put n'; Pure _ tt
                                         end)}}}.
 Proof.
   do 2 eexists.
@@ -360,7 +348,7 @@ Proof.
   unify ?init e.
   derive' tt.
   derive' tt.
-  derive' tt.
+  derive' (tt,x).
   Grab Existential Variables.
   all: exact unit || exact (fun _ => None).
 Defined.
@@ -379,8 +367,7 @@ Proof.
   unify ?init e.
   derive' tt.
   derive' (tt,x).
-  derive' tt.
-  derive' tt.
+  derive' (tt,H0,x).
   Grab Existential Variables.
   all: exact unit || exact (fun _ => None).
 Defined.
