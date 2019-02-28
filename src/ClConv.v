@@ -105,6 +105,23 @@ Ltac put_label x :=
   assert (label x) by (unfold label; auto).
 
 Ltac free_var' exp env cont :=
+  let rec aux env :=
+      lazymatch env with
+      | (?env',?x) =>
+        lazymatch exp with
+        | context[x] =>
+          let env'' := aux env' in
+          constr:((env'',x))
+        | _ =>
+          aux env'
+        end
+      | _ => tt
+      end
+  in
+  let e := aux env in
+  cont e.
+          (*
+          Ltac free_var' exp env cont :=
   lazymatch exp with
   | Fix ?f =>
     lazymatch type of f with
@@ -116,6 +133,14 @@ Ltac free_var' exp env cont :=
                                          ltac:(fun y =>
                                             let v := merge x y in
                                             cont v))
+    | list nat -> _ =>
+      let eN := (eval simpl in (f [])) in
+      let eC := (eval simpl in (f (inhabitat::inhabitat))) in
+      free_var' eN env ltac:(fun x =>
+                               free_var' eC env
+                                         ltac:(fun y =>
+                                                 let v := merge x y in
+                                                 cont v))
     end
   | ?f ?x =>
     free_var' f env ltac:(fun v1 =>
@@ -147,7 +172,8 @@ Ltac free_var' exp env cont :=
     | H : label ?exp' |- _ =>
       tryif constr_eq exp exp' then
         clear H;
-        free_var' (Fix exp) env cont
+        free_var' (Fix exp) env cont;
+        put_label exp'
       else fail
     | _ =>
       tryif is_var exp then
@@ -160,7 +186,7 @@ Ltac free_var' exp env cont :=
         cont tt
     end
   end.
-  
+  *)
 
 Ltac free_var exp env :=
   lazymatch exp with
@@ -358,42 +384,96 @@ Ltac derive' env :=
     | ?fn ?m =>
       lazymatch current with
       | ?f ?prev =>
-        lazymatch fn with
-        | Fix ?fx =>
-          let ty := type of prev in
-          let x' := fresh "x" in
-          lazymatch prev with
-          | m =>
-            let e := open_constr:(fun x => match x return state with O => _ x | S x' => _ x end) in
-            unify f e;
-            simpl;
-            let tmp := fresh in
-            let m' := fresh in
-            set (tmp := fn);
-            generalize m at 1 6 as m';
-            subst tmp;
-            unfold Fix;
-            put_label fx;
-            induction m'
-          | _ =>
-            let e := open_constr:(match m return ty -> state with O => _ | S m' => _ end) in
-            unify f e;
-            simpl;
-            let tmp := fresh in
-            let m' := fresh in
-            set (tmp := fn);
-            generalize m at 1 4 as m';
-            subst tmp;
-            unfold Fix;
-            put_label fx;
-            induction m'
-          end
-        | _ => 
-          let e := open_constr:(fun _ => _) in
-          unify f e;
-          simpl;
-          eauto
-        end
+        let rec aux fn accum :=
+            lazymatch fn with
+            | Fix ?fx =>
+              let ty := type of prev in
+              let x' := fresh "x" in
+              lazymatch prev with
+              | m =>
+                let e := open_constr:(fun x =>
+                                        match x return state with
+                                          O => _ x
+                                        | S x' => _ x
+                                        end)
+                in
+                unify f e;
+                simpl;
+                let tmp := fresh in
+                let tmp' := fresh in
+                set (tmp := fn);
+                set (tmp' := step);
+                lazymatch goal with
+                  |- equiv _ ?c _ =>
+                  cut (label c); [|unfold label; auto];
+                  pattern m at 1;
+                  lazymatch goal with
+                    |- (fun n:nat => label ?body -> _) _ =>
+                    lazymatch constr:(_ : forall n:nat, @reify_cls _ body) with
+                    | ?res =>
+                      simpl; intros;
+                      let tmp'' := fresh in
+                      set (tmp'' := res);
+                      fold (tmp'' m);
+                      let m' := fresh in
+                      generalize m at 1 2 as m';
+                      subst tmp;
+                      subst tmp';
+                      subst tmp'';
+                      intro m';
+                      accum;
+                      unfold Fix at 1;
+                      put_label fx;
+                      induction m';
+                      intros
+                    end
+                  end
+                end
+              | _ =>
+                let a := fresh in
+                let m0 := fresh in
+                let e :=
+                    lazymatch type of m with
+                    | nat => 
+                      open_constr:(fun x:ty => match m return state with
+                                     O => _ x
+                                   | S m0 => _ x
+                                   end)
+                    | list nat =>
+                      open_constr:(fun x:ty => match m return state with
+                                   | [] => _ x
+                                   | a::m0 => _ x
+                                   end)
+                    end
+                in
+                unify f e;
+                simpl;
+                let tmp := fresh in
+                let tmp' := fresh in
+                let m' := fresh in
+                set (tmp := fn);
+                set (tmp' := step);
+                (generalize m at 1 4 as m' || generalize m at 1 2 as m');
+                subst tmp;
+                subst tmp';
+                intro m';
+                accum;
+                unfold Fix at 1;
+                put_label fx;
+                induction m';
+                intros
+              end
+            | ?fn' ?a =>
+              aux fn' ltac:(generalize a; accum)
+            | _ =>
+              let a := fresh in
+              let e := open_constr:(fun a => _) in
+              unify f e;
+              simpl;
+              eauto
+            end
+        in
+        aux fn idtac
       end
     end
   end.
@@ -438,24 +518,207 @@ Proof.
   all: exact unit || exact (fun _ => None).
 Defined.
 
+
+Definition readL (f : list nat -> t effect unit) :=
+  Fix (fix readL accum n :=
+         match n with
+         | O => f accum
+         | S n' =>
+           x <- get;
+             readL (accum ++ [x]) n'
+         end).
+
+
+Definition printL (e : t effect unit) :=
+  Fix (fix printL l :=
+    match l with
+    | [] => e
+    | a::l' =>
+      put a;
+        printL l'
+    end).
+
 Theorem ex3: {state & {step & {init | @equiv state _ step init
                                              (m <- get;
                                                 n <- get;
+                                                put 0;
                                         Fix (fix f y :=
                                            match y with
                                            | O => put n; put m; Pure _ tt
                                            | S y' => put y; f y'
-                                           end) m)}}}.
+                                           end) (m + n)%nat)}}}.
 Proof.
   do 2 eexists.
   eexists ?[init].
   let e := open_constr:(inl tt) in
   unify ?init e.
   derive' tt.
-  derive' (tt,x).
-  derive' (tt,H0,x).
+  derive' (tt,x0,x).
+  derive' (tt,H3,x0,x).
+  apply IHnat.
   Grab Existential Variables.
   all: exact unit || exact (fun _ => None).
 Defined.
 
-Eval cbv [ex3 sum_merge prod_curry projT2 projT1] in projT1 (projT2 ex3).
+Theorem ex_read: {state & {step & forall l', {init |
+                       @equiv state _ step init
+                              (n <- get;
+                                 readL (fun l => put (length l); Pure _ tt)
+                                       l' n) }}}.
+Proof.
+  unfold readL.
+  do 2 eexists.
+  intros.
+  eexists ?[init].
+  let e := open_constr:(inl (tt,l')) in
+  unify ?init e.
+  derive' (tt,l').
+  derive' (tt,l'0).
+  derive' (tt,l'0,H3).
+  Grab Existential Variables.
+  all: exact unit || exact (fun _ => None).
+Defined.
+
+Eval cbv [prod_curry ex_read sum_merge projT1 projT2] in projT1 (projT2 ex_read).
+
+Goal {state & {step & forall l,
+                  {init |
+                   @equiv state _ step init
+                          (put (length l); printL (Pure _ tt) l)}}}.
+Proof.
+  unfold printL.
+  do 2 eexists.
+  intros.
+  eexists ?[init].
+  let e := open_constr:(inl (tt,l)) in
+  unify ?init e.
+  derive' (tt,l).
+  derive' tt.
+  derive' (tt, a, H3).
+  eapply IHlist.
+  Grab Existential Variables.
+  all: exact unit || exact (fun _ => None).
+Defined.
+
+Goal {state & {step & forall l',
+                  {init |
+                   @equiv state _ step init
+                   (n <- get;
+                      readL (fun l => printL (Pure _ tt) l) l' n) }}}.
+Proof.
+  unfold readL, printL.
+  do 2 eexists.
+  intros.
+  eexists ?[init].
+  let e := open_constr:(inl (tt,l')) in
+  unify ?init e.
+  derive' (tt,l').
+  derive' (tt,l'0).
+  derive' tt.
+  derive' (tt,a,H5).
+  apply IHlist.
+  derive' (tt,l'0,H3).
+  Grab Existential Variables.
+  all: exact unit || exact (fun _ => None).
+Defined.
+
+Theorem ex4:
+  {state & {step & {init |
+                    @equiv state _ step init
+                           (k <- get;
+                              l <- get;
+                              n <- get;
+                              Fix (fix f z y x :=
+                                     match x with
+                                     | O =>
+                                       put y; Pure _ tt
+                                     | S x' =>
+                                       put 0;
+                                       f (S z) (z + y)%nat x'
+                                     end) l k n) }}}.
+Proof.
+  do 2 eexists.
+  eexists ?[init].
+  let e := open_constr:(inl tt) in
+  unify ?init e.
+  derive' tt.
+  derive' (tt,x2).
+  derive' (tt,x2,x3,H3).
+  Grab Existential Variables.
+  all: exact unit || exact (fun _ => None).
+Defined.
+
+Eval cbv [ex4 sum_merge prod_curry projT2 projT1] in projT1 (projT2 ex4).
+
+
+
+Parameter generateKey : unit -> list nat * list nat.
+Parameter open : list nat -> list nat -> list nat -> list nat.
+Parameter seal : list nat -> list nat -> list nat -> list nat.
+
+Fixpoint splitAt A n (l : list A) :=
+  match n with
+  | O => ([], l)
+  | S n' =>
+    match l with
+    | [] => ([], [])
+    | x::l' =>
+      let (l1,l2) := splitAt n' l' in
+      (x::l1, l2)
+    end
+  end.
+
+
+Notation "l <- 'read' ( l0 , n ) ; e" := (readL (fun l => e) l0 n) (at level 100, right associativity).
+Notation "'print' l ; e" := (printL e l) (at level 100, right associativity).
+
+Definition handshake l0 l1 pk sk :=
+  n <- get;
+    m <- get;
+    let key := generateKey tt in
+    let ourEphemeralPublic := fst key in
+    let ourEphemeralSecret := snd key in
+    print ourEphemeralPublic;
+      theirEphemeralPublic <- read(l0, n);
+      theirHandshakeSealed <- read(l1, m);
+      let theirHandshake :=
+          open theirHandshakeSealed theirEphemeralPublic ourEphemeralSecret
+      in
+      let p := splitAt n theirHandshake in
+      let theirPK := fst p in
+      let theirHandshakeRest := snd p in
+      let hs := open theirHandshakeRest theirPK ourEphemeralSecret in
+      let ourHandshake :=
+          pk ++ seal (ourEphemeralPublic ++ theirEphemeralPublic) theirEphemeralPublic sk
+      in
+      print (seal ourHandshake theirPK ourEphemeralSecret);
+        Pure _ tt.
+
+Theorem handshake_derive :
+  {state & {step &
+            forall l0 l1 pk sk,
+              {init |
+               @equiv state _ step init (handshake l0 l1 pk sk) }}}.
+Proof.
+  unfold handshake, printL, readL.
+  do 2 eexists.
+  intros.
+  eexists ?[init].
+  let e := open_constr:(inl (tt,l0,l1,pk,sk)) in
+  unify ?init e.
+  derive' (tt,l0,l1,pk,sk).
+  derive' (tt,l0,l1,pk,sk,x).
+  derive' (tt,l2,l1,pk,sk,x).
+  derive' (tt,l3,l1,l2,pk,sk,x).
+  derive' tt.
+  derive' (tt,a,H7).
+  apply IHlist.
+  derive' (tt,l3,l2,H5,pk,sk,x).
+  derive' (tt,l2,l1,H4,pk,sk,x).
+  unshelve derive' (tt,l0,l1,H3,pk,sk,x,a).
+  all : exact unit || exact (fun _ => None ).
+Defined.
+
+Arguments existT {_ _}.
+
+Eval cbv [handshake_derive projT1 projT2 sum_merge prod_curry] in projT1 (projT2 handshake_derive).
