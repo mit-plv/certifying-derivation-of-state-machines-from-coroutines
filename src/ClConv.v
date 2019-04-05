@@ -39,11 +39,15 @@ Inductive t (eff : Type -> Type) (a : Type) :=
 Inductive effect : Type -> Type :=
 | getE : unit -> effect nat
 | putE : nat -> effect unit
+| readE : unit -> effect (list nat)
+| printE : list nat -> effect unit
 | genKeyE : unit -> effect (list nat * list nat).
 
 Notation "n <- 'get' ; e" := (Eff (getE tt) (fun n => e)) (at level 100, right associativity).
 Notation "'put' n ; e" := (Eff (putE n) (fun _ => e)) (at level 100).
 Notation "'( k1 , k2 ) <- 'genKey' ; e" := (Eff (genKeyE tt) (fun k => let k1 := fst k in let k2 := snd k in e)) (at level 100, right associativity).
+Notation "l <- 'read' ; e" := (Eff (readE tt) (fun l => e)) (at level 100, right associativity).
+Notation "'print' l ; e" := (Eff (printE l) (fun _ => e)) (at level 100, right associativity).
 
 Definition step_range (state : Type) :=
   option {ty : Type & effect ty * (ty -> state) }.
@@ -279,9 +283,13 @@ Ltac derive' env :=
       | ?f ?prev =>
         let m' := fresh in
         let ty := type of prev in
-        let e := open_constr:(fun x:ty => match m return state with None => _ x | Some m' => _ x end) in
-        unify f e;
-        destruct m
+        lazymatch (eval pattern prev in m) with
+        | ?ctx _ =>
+          let e := open_constr:(fun x:ty => match ctx x return state with None => _ x | Some m' => _ x end) in
+          unify f e;
+          cbv beta;
+          destruct m
+        end
       end
     | (Let var := ?def in ?body) =>
       lazymatch current with
@@ -615,10 +623,10 @@ Fixpoint splitAt A n (l : list A) :=
     end
   end.
 
-
+(*
 Notation "l <- 'read' ( l0 , n ) ; e" := (readL (fun l => e) l0 n) (at level 100, right associativity).
 Notation "'print' l ; e" := (printL e l) (at level 100, right associativity).
-
+*)
 Definition foo :=
   '(k1,k2) <- genKey;
     put 0;
@@ -634,28 +642,20 @@ Proof.
   let e := open_constr:(inl tt) in
   unify ?init e.
   derive' tt.
-  derive' (tt,x).
-  derive' tt.
-  derive' (tt,a,H6).
-  apply IHlist.
-  derive' (tt,a,H4,x).
-  apply IHlist.
   Grab Existential Variables.
   all: exact unit || exact (fun _ => None).
 Defined.
 
 
-Definition handshake l0 l1 pk sk :=
+Definition handshake pk sk :=
   '(ourEphemeralPublic,ourEphemeralSecret) <- genKey;
-    n <- get;
-    m <- get;
     print ourEphemeralPublic;
-      theirEphemeralPublic <- read(l0, n);
-      theirHandshakeSealed <- read(l1, m);
+      theirEphemeralPublic <- read;
+      theirHandshakeSealed <- read;
       match open theirHandshakeSealed theirEphemeralPublic ourEphemeralSecret [1] with
       | None => put 0; Pure _ tt
       | Some theirHandshake =>
-        Let p := splitAt n theirHandshake in
+        Let p := splitAt 32 theirHandshake in
         Let theirPK := fst p in
         Let theirHandshakeRest := snd p in
         let hs := open theirHandshakeRest theirPK ourEphemeralSecret [2] in
@@ -668,29 +668,20 @@ Definition handshake l0 l1 pk sk :=
 
 Theorem handshake_derive :
   {state & {step &
-            forall l0 l1 pk sk,
+            forall pk sk,
               {init |
-               @equiv state _ step init (handshake l0 l1 pk sk) }}}.
+               @equiv state _ step init (handshake pk sk) }}}.
 Proof.
-  unfold handshake, printL, readL.
+  unfold handshake.
   do 2 eexists.
   intros.
   eexists ?[init].
-  let e := open_constr:(inl (tt,l0,l1,pk,sk)) in
+  let e := open_constr:(inl (tt,pk,sk)) in
   unify ?init e.
-  derive' (tt,l0,l1,pk,sk).
-  derive' (tt,l0,pk,sk,x,x0).
-  derive' (tt,l2,l1,pk,sk,x,x0).
-  derive' (tt,l3,l2,pk,sk,x,x0).
-  derive' (tt,l3,l2,pk,sk,x,x0).
-  derive' (tt,l3,l2,pk,sk,x,x0,H5).
+  derive' (tt,pk,sk).
+  derive' (tt,pk,sk,x,x1).
+  derive' (tt,pk,sk,x,x1,H).
   derive' tt.
-  derive' (tt,a,H11).
-  apply IHlist.
-  derive' tt.
-  derive' (tt,l3,l2,H8,pk,sk,x,x0).
-  derive' (tt,l1,l2,H6,pk,sk,x,x0).
-  derive' (tt,l0,l1,H4,pk,sk,x,x0,a).
   Grab Existential Variables.
   all : exact unit || exact (fun _ => None ).
 Defined.
@@ -716,8 +707,10 @@ Extract Inductive sum => "Either" ["Left" "Right"].
 Extract Inductive option => "Maybe" ["Just" "Nothing"].
 Extract Inductive nat => Int ["0" "succ"] "(\fO fS n -> if n == 0 then fO () els e fS (n-1))".
 
+Extract Inlined Constant splitAt => "Prelude.splitAt".
+
 Extract Constant open =>
-  "\msg pk sk nonce -> boxOpen (fromJust $ decode $ pack $ map fromIntegral pk) (fromJust $ decode $ pack $ map fromIntegral sk) (fromJust $ decode $ pack $ map fromIntegral nonce) (pack $ map fromIntegral msg)".
+  "\msg pk sk nonce -> boxOpen (fromJust $ decode $ BS.pack $ Prelude.map fromIntegral pk) (fromJust $ decode $ BS.pack $ Prelude.map fromIntegral sk) (fromJust $ decode $ BS.pack $ Prelude.map fromIntegral nonce) (BS.pack $ Prelude.map fromIntegral msg)".
 Extract Constant seal =>
   "\msg pk sk nonce -> box (fromJust $ decode $ pack $ map fromIntegral pk) (fromJust $ decode $ pack $ map fromIntegral sk) (fromJust $ decode $ pack $ map fromIntegral nonce) (pack $ map fromIntegral msg)".
 
