@@ -102,6 +102,10 @@ Definition ex :=
   Pure _ tt.
 
 Eval cbv in ex.
+(*
+     = put 1; (put 10; (put 3; (put 30; (put 6; (put 60; Pure effect tt)))))
+     : t effect unit
+*)
 
 Definition step_range (state : Type) :=
   option {ty : Type & effect ty * (ty -> state) }.
