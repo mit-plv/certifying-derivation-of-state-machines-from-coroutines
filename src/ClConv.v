@@ -43,11 +43,65 @@ Inductive effect : Type -> Type :=
 | printE : list nat -> effect unit
 | genKeyE : unit -> effect (list nat * list nat).
 
-Notation "n <- 'get' ; e" := (Eff (getE tt) (fun n => e)) (at level 100, right associativity).
-Notation "'put' n ; e" := (Eff (putE n) (fun _ => e)) (at level 100).
-Notation "'( k1 , k2 ) <- 'genKey' ; e" := (Eff (genKeyE tt) (fun k => let k1 := fst k in let k2 := snd k in e)) (at level 100, right associativity).
-Notation "l <- 'read' ; e" := (Eff (readE tt) (fun l => e)) (at level 100, right associativity).
-Notation "'print' l ; e" := (Eff (printE l) (fun _ => e)) (at level 100, right associativity).
+Notation "n <- 'get' ; e" := (Eff (getE tt) (fun n => e)) (at level 200, right associativity).
+Notation "'put' n ; e" := (Eff (putE n) (fun _ => e)) (at level 200).
+Notation "'( k1 , k2 ) <- 'genKey' ; e" := (Eff (genKeyE tt) (fun k => let k1 := fst k in let k2 := snd k in e)) (at level 200, right associativity).
+Notation "l <- 'read' ; e" := (Eff (readE tt) (fun l => e)) (at level 200, right associativity).
+Notation "'print' l ; e" := (Eff (printE l) (fun _ => e)) (at level 200, right associativity).
+
+Inductive Coroutine (a b : Type):=
+  Co : (b -> t effect (CoroutineState a b)) -> Coroutine a b
+with CoroutineState (a b : Type) :=
+  Done : a -> CoroutineState a b
+| Suspend : a -> Coroutine a b -> CoroutineState a b.
+
+Definition suspend (a b : Type)(x : a)(c : Coroutine a b) :=
+  Pure effect (Suspend x c).
+
+Notation "'yield' x ; y <- 'input' ; e" :=
+  (suspend x (Co (fun y => e))) (at level 200, right associativity).
+Notation "'return' x" :=
+  (Pure _ (Done _ x)) (at level 200).
+
+Fixpoint seqE a b (e : t effect a)(f : a -> t effect b) : t effect b :=
+  match e with
+  | Pure _ x => f x
+  | Eff ef next =>
+    Eff ef (fun x => seqE (next x) f)
+  end.
+
+Notation "n <- 'resume' c $ x ; e" :=
+  (match c with
+  | Co e' =>
+   seqE (e' x) (fun s =>
+    match s with
+    | Done _ n => e
+    | Suspend n c => e
+    end)
+  end) (at level 100, right associativity).
+
+Definition coroutine_ex :=
+  Co (fun n =>
+        put n;
+        yield n;
+        m <- input;
+        put (n+m)%nat;
+        yield (n+m)%nat;
+        k <- input;
+        put (n+m+k)%nat;
+        return (n+m+k)%nat).
+
+Definition ex :=
+  let c := coroutine_ex in
+  n <- resume c $ 1;
+  put (10 * n)%nat;
+  k <- resume c $ 2;
+  put (10 * k)%nat;
+  s <- resume c $ 3;
+  put (10 * s)%nat;
+  Pure _ tt.
+
+Eval cbv in ex.
 
 Definition step_range (state : Type) :=
   option {ty : Type & effect ty * (ty -> state) }.
@@ -416,6 +470,19 @@ Ltac derive' env :=
       end
     end
   end.
+
+Theorem ex_derive :
+  {state & {step & {init | @equiv state _ step init ex}}}.
+Proof.
+  do 2 eexists.
+  eexists ?[init].
+  unfold ex, coroutine_ex, seqE.
+  simpl.
+  let e := open_constr:(inl tt) in
+  unify ?init e.
+  unshelve derive' tt.
+  all: exact unit || exact (fun _ => None).
+Defined.
 
 Definition exLetIn : t effect unit :=
   n <- get;
