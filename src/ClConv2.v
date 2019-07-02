@@ -29,14 +29,6 @@ Section Effect.
   Definition equiv state (step : step_type state) init p :=
     exists op s, step init = (fun _ _ => Some (s, op)) /\ equiv' step s p op.
 
-  (*Inductive equiv (state : Type)(step : step_type state)(init : state)
-    : t -> Prop :=
-  | EquivEff : forall e (a : args e) p s,
-      step init = (fun _ _ => Some (s, Some (existT _ _ a))) ->
-      equiv' step s (Eff a p) (Some (existT _ _ a)) ->
-      equiv step init (Eff a p)
-  | EquivDone : equiv' step init Done None -> equiv step init Done.
-*)
 End Effect.
 
 Inductive effect := getNat | putNat | getString | putString.
@@ -1025,3 +1017,5 @@ Proof.
   Grab Existential Variables.
   all: intros; (exact None || exact (inr (inl tt)) || idtac).
 Defined.
+
+Eval cbv in (projT1 (projT2 ex_derive)).
