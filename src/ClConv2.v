@@ -19,8 +19,8 @@ Section Effect.
   Inductive equiv' (state : Type)(step : step_type state) :
     state -> t -> option { e : eff & args e } -> Prop :=
   | Equiv'Eff : forall s e (a : args e) p next op,
-      (forall r, step s e r = Some (next s r, op s r)) ->
-      (forall r, equiv' step (next s r) (p r) (op s r)) ->
+      (forall r, step s e r = Some (next r, op r)) ->
+      (forall r, equiv' step (next r) (p r) (op r)) ->
       equiv' step s (Eff a p) (Some (existT _ _ a))
   | Equiv'Done : forall s,
       step s = (fun _ _ => None) ->
@@ -206,12 +206,14 @@ Inductive equiv_parent A B :
            | _ => Done _ _
            end).
 
+Definition Fix A (x : A) := x.
+
 Definition ex N :=
   let c1 := ex_coroutine in
   let c2 := ex_coroutine in
   n1 <- resume c1 $ 1;
     n2 <- resume c2 $ 2;
-  (fix aux N c1 c2 :=
+  Fix ((fix aux c1 c2 N :=
     match N with
     | O => Done args_effect rets_effect
     | S N' =>
@@ -219,8 +221,8 @@ Definition ex N :=
         putN m1;
         m2 <- resume c2 $ n2;
         putN m2;
-        aux N' c1 c2
-    end) N c1 c2.
+        aux c1 c2 N'
+    end) c1 c2) N.
 
 Definition sum_merge (A B C : Type)(f : A -> C)(g : B -> C)(x : sum A B) :=
   match x with
@@ -238,6 +240,25 @@ Ltac curry_lhs :=
         | ?f (_,_) =>
           let f' := open_constr:(prod_curry _) in
           unify f f'; unfold prod_curry
+        | ?p' _ =>
+          aux p'
+        end
+    in
+    aux x
+  end.
+
+Definition prod_curry_rev (A B C : Type)(f : A -> B -> C)(x : B * A) :=
+  let (b,a) := x in
+  f a b.
+
+Ltac curry_lhs' :=
+  lazymatch goal with
+    |- ?x = _ =>
+    let rec aux p :=
+        lazymatch p with
+        | ?f (_,_) =>
+          let f' := open_constr:(prod_curry_rev (fun x => _)) in
+          unify f f'; unfold prod_curry_rev
         | ?p' _ =>
           aux p'
         end
@@ -308,12 +329,13 @@ Ltac dest_step :=
   simpl;
   repeat (dest_sum; simpl);
   lazymatch goal with
-    |- ?f ?r = _ =>
+    |- _ ?r = _ =>
     pattern_rhs r; apply equal_f
   end;
+  repeat curry_lhs';
   lazymatch goal with
-    |- ?f _ ?a = ?X =>
-    lazymatch a with
+    |- ?f ?b ?arg = ?X =>
+    lazymatch arg with
     | getNat =>
       let u := open_constr:(fun x e =>
                             match e as e0 return rets_effect e0 -> _ with
@@ -331,99 +353,267 @@ Ltac dest_step :=
       in
       unify f u
     | yield =>
-      pattern_rhs yield; apply equal_f
+      pattern_rhs yield; apply equal_f;
+      pattern_rhs b; apply equal_f
     end
   | _ => idtac
   end;
   simpl; apply eq_refl.
 
+Ltac free_var body vars :=
+  lazymatch vars with
+  | (?rest,?a) =>
+    let r := free_var body rest in
+    lazymatch body with
+    | context [a] =>
+      constr:((r,a))
+    | _ => r
+    end
+  | ?a => tt
+  end.
+
+Ltac derive_yield ptr env :=
+  lazymatch goal with
+    |- equiv' ?step ?st ?prog ?op =>
+    lazymatch prog with
+    | Eff _ ?a ?p =>
+      lazymatch st with
+      | ?f ?r =>
+        let fv := free_var prog (env,r) in
+        let u := open_constr:(fun r => _) in
+        unify f u;
+        lazymatch op with
+        | ?g _ =>
+          let u := open_constr:(fun r => _) in
+          unify g u
+        end;
+        simpl;
+        lazymatch goal with
+          |- equiv' _ ?st' _ _ =>
+          let u := open_constr:(ptr (inl fv)) in
+          unify st' u
+        end;
+        eapply Equiv'Eff;
+        [ intros; simpl; dest_step
+        | let fr := fresh in
+          intro fr;
+          derive_yield (fun x => ptr (inr x)) (env,fr)
+        ]
+      | _ =>
+        let fv := free_var prog env in
+        let u := open_constr:(ptr (inl fv)) in
+        unify st u;
+        eapply Equiv'Eff;
+        [ intros; simpl; dest_step
+        | let fr := fresh in
+          intro fr;
+          derive_yield (fun x => ptr (inr x)) (env,fr)
+        ]
+      end
+    | Done _ _ =>
+      lazymatch st with
+      | ?f ?r =>
+        let fv := free_var prog (env,r) in
+        let u := open_constr:(fun r => _) in
+        unify f u;
+        lazymatch op with
+        | ?g _ =>
+          let u := open_constr:(fun r => _) in
+          unify g u
+        end;
+        simpl;
+        lazymatch goal with
+          |- equiv' _ ?st' _ _ =>
+          let u := open_constr:(ptr fv) in
+          unify st' u
+        end;
+        eapply Equiv'Done;
+        simpl;
+        lazymatch goal with
+          |- ?f _ = _ =>
+          let u := open_constr:(fun _ => _) in
+          unify f u;
+          simpl;
+          apply eq_refl
+        end
+      end
+    end
+  end.
+
+Ltac derive_child env :=
+  match goal with
+    |- _ _ ?init _ =>
+    let u := open_constr:(inl env) in
+    unify init u
+  end;
+  do 2 eexists;
+  split;
+  [ dest_step
+  | derive_yield open_constr:(fun x => inr x) env].
 
 Definition get_put_derive :
   {state & {step & {init | @equiv _ _ _ state step init get_put}}}.
 Proof.
-  unfold get_put, equiv.
-  eexists.
-  eexists ?[step].
-  eexists ?[init].
-  eexists.
-  eexists.
-  let e := open_constr:(inl tt) in
-  unify ?init e.
-  split.
-  let e := open_constr:(_ ||| _) in
-  unify ?step e.
-  simpl.
-  unify_fun.
-  match goal with
-    |- _ _ ?s _ _ =>
-    let u := open_constr:(inr (inl tt)) in
-    unify s u
-  end.
-  econstructor; intros.
-  simpl.
-  dest_step.
-  match goal with
-    |- _ _ _ _ (?op _ _) =>
-    let u := open_constr:(fun _ _ => _) in
-    unify op u
-  end.
-  simpl.
-  econstructor; intros.
-  simpl in *.
-  match goal with
-    |- _ (?next _ _) _ r0 = _ =>
-    let u := open_constr:(fun _ (r : nat) => inr (inr _)) in
-    unify next u
-  end.
-  simpl.
-  match goal with
-    |- _ ?x _ _ = _ =>
-    let u := open_constr:(inl r) in
-    unify x u
-  end.
-  dest_sum.
-  simpl.
-  pattern_rhs r0.
-  apply equal_f.
-  match goal with
-    |- ?f _ _ = ?X =>
-    match X with
-      (fun u => Some (?next _ _ , ?op _ _ )) =>
-      let ty := type of next in
-      let u' := open_constr:(_ -> _ -> _+(_+(_+(_+_)))) in
-      unify ty u';
-      let u := open_constr:(fun _ _ => inr (inr (inr (inl tt)))) in
-      unify next u;
-        let u := open_constr:(fun _ r => _) in
-        unify op u
-    end
-  end.
-  simpl.
-  match goal with
-    |- ?f _ _ = ?X =>
-    let u := open_constr:(fun x e =>
-                            match e as e0 return rets_effect e0 -> _ with
-                            | putNat => _
-                            | _ => fun _ => None
-                            end)
-    in
-    unify f u
-  end.
-  simpl.
-  2:simpl;econstructor.
-  apply eq_refl.
-  simpl.
-  match goal with
-    |- ?g _ = ?X =>
-    let u := open_constr:(fun _ => X) in
-    unify g u
-  end.
-  simpl.
-  reflexivity.
-  Grab Existential Variables.
-  exact unit.
+  unfold get_put.
+  do 3 eexists.
+  derive_child tt.
 Defined.
 
+Definition vec_curry A B n (f : A -> Vector.t A n -> B) : Vector.t A (S n) -> B :=
+  fun v => Vector.caseS' v _ (fun a v0 => f a v0).
+
+Lemma nth_tl : forall A n (v : Vector.t A (S n)) k,
+    Vector.nth (Vector.tl v) k = Vector.nth v (Fin.FS k).
+Proof.
+  intros.
+  apply (Vector.caseS' v).
+  intros.
+  reflexivity.
+Qed.
+
+Lemma nth_FS : forall A n (v : Vector.t A n) c k,
+    Vector.nth (Vector.cons _ c _ v) (Fin.FS k) = Vector.nth v k.
+Proof.
+  auto.
+Qed.
+
+Lemma nth_replace : forall A n (v : Vector.t A n) c k,
+    Vector.nth (Vector.replace v k c) k = c.
+Proof.
+  intros.
+  revert v.
+  induction k; intros;
+  apply (Vector.caseS' v); auto.
+Qed.
+
+Lemma nth_replace_other : forall A n (v : Vector.t A n) c k k',
+    k <> k' ->
+    Vector.nth (Vector.replace v k c) k' = Vector.nth v k'.
+Proof.
+  intros.
+  revert H v.
+  apply (Fin.rect2 (fun n k k' =>
+                      k <> k' ->
+                      forall v : Vector.t A n,
+                        Vector.nth (Vector.replace v k c) k' = Vector.nth v k'));
+    intros.
+  congruence.
+  apply (Vector.caseS' v).
+  auto.
+  apply (Vector.caseS' v).
+  auto.
+  apply (Vector.caseS' v).
+  intros.
+  simpl.
+  apply H.
+  congruence.
+Qed.
+
+Ltac vec_replace v :=
+  let vec := fresh in
+  set (vec := v);
+  lazymatch v with
+  | Vector.replace ?v' ?k ?c =>
+    replace c with (Vector.nth vec k) by (unfold vec; rewrite nth_replace; auto);
+    lazymatch goal with
+    | |- context[Vector.nth v' k] =>
+      fail 0
+    | |- context[Vector.nth v' ?k'] =>
+      replace (Vector.nth v' k') with (Vector.nth vec k') by
+          (unfold vec; rewrite nth_replace_other; congruence)
+    end
+  | _ =>
+    lazymatch type of v with
+    | Vector.t _ (S ?n) =>
+      let rec aux v k := (
+            lazymatch v with
+            | Vector.cons _ ?c _ ?cs =>
+              replace c with (Vector.nth vec k) by (unfold vec; auto);
+              aux cs (Fin.FS k)
+            | Vector.nil => idtac
+            | _ =>
+              lazymatch goal with
+                |- context[Vector.nth v ?m] =>
+                let s := fresh in
+                evar (s : Fin.t (S n));
+                replace (Vector.nth v m) with (Vector.nth vec s) by
+                    (unfold s, vec; etransitivity;
+                     [repeat apply nth_FS|reflexivity])
+              | _ => idtac
+              end
+            end)
+      in
+      aux v (@Fin.F1 n)
+    end
+  end.
+
+Ltac prog_eq :=
+  lazymatch goal with
+    |- _ _ _ = ?f _ ?ccs =>
+    vec_replace ccs;
+    let u := open_constr:(fun v ccs0 => _) in
+    unify f u;
+    apply eq_refl
+  end.
+
+Ltac derive_parent_core :=
+  lazymatch goal with
+  | |- _ (?g _) =>
+    let u := open_constr:(fun v0 => _) in
+    unify g u
+  | |- _ (fun ss => ?x ss _) =>
+    let u := open_constr:(fun ss r => _) in
+    unify x u
+  | _ => idtac
+  end;
+  simpl;
+  econstructor.
+
+Ltac derive_parent_fix :=
+  lazymatch goal with
+    |- _ (fun ss => Fix _ ?N) (?g _) =>
+    unfold Fix;
+    pattern g;
+      match goal with
+        |- ?G _ =>
+        let e := fresh in
+        unshelve (evar (e : {h | G h});
+                  eassert (E := e : {h | G h}));
+          [|
+           simpl;
+           let e0 := fresh in
+           pose (proj2_sig e) as e0;
+           unfold e in e0;
+           simpl in e0;
+           apply e0
+          ]
+      end;
+      induction N; eexists; simpl
+  end.
+
+Ltac solve_child :=
+  match goal with
+    |- equiv _ _ ?x =>
+    let y := eval red in x in
+        change x with y
+  end;
+  derive_child tt.
+
+Ltac derive_parent :=
+  intros;
+  derive_parent_core
+  || (simpl; derive_parent_fix)
+  || prog_eq
+  || (
+    simpl;
+    lazymatch goal with
+      |- _ (fun ss => ?X ss _) =>
+      let u := open_constr:(fun ss r0 => _) in
+      unify X u
+    end;
+    repeat lazymatch goal with
+           | H : {h | _} |- _ => apply (proj2_sig H)
+           end).
 
 Opaque seqE.
 Theorem ex_derive_parent :
@@ -435,410 +625,160 @@ Proof.
   unfold ex.
   intros.
   eexists.
-  econstructor.
-  intros.
-  unfold ex_coroutine.
-  match goal with
-    |- _ _ ?init _ =>
-    let u := open_constr:(inl tt) in
-    unify init u
-  end.
-  do 2 eexists.
-  split.
-  dest_step.
-  match goal with
-    |- _ _ ?s _ _ =>
-    let u := open_constr:(inr (inl tt)) in
-    unify s u
-  end.
-  econstructor; intros.
-  simpl.
-  pattern_rhs r.
-  apply equal_f.
-  pattern_rhs yield.
-  apply equal_f.
-  dest_step.
-  simpl.
-  match goal with
-    |- _ _ (?next _ r) _ (?op _ _) =>
-    let u := open_constr:(fun _ r0 => inr (inr (_ r0))) in
-    unify next u;
-      let u := open_constr:(fun _ r => _) in
-      unify op u
-  end.
-  simpl.
-  match goal with
-    |- _ _ (inr (inr (?x _))) _ _ =>
-    match type of x with
-      _ -> ?T =>
-      let u := open_constr:(nat + _) in
-      unify T u
-    end;
-    let u := open_constr:(fun r => inl r) in
-    unify x u
-  end.
-  simpl.
-  econstructor.
-  intros.
-  simpl.
-  dest_step.
-  intros.
-  match goal with
-    |- _ _ (?next _ _) _ (?op _ _) =>
-    let u := open_constr:(fun _ _ => inr (inr (inr tt))) in
-    unify next u;
-      let u := open_constr:(fun _ _ => _) in
-      unify op u
-  end.
-  econstructor.
-  simpl.
-  pattern_rhs tt.
-  apply eq_refl.
-  intros.
-  (*
-  match goal with
-    |- ?lhs = ?f _ ?ccs0 =>
-    set (ccs := ccs0)
-  end.
-  replace c with (@Vector.nth _ 1 ccs Fin.F1) by (subst ccs; auto).
-  lazymatch goal with
-    |- _ = ?f _ _ =>
-    let u := open_constr:(fun v ccs => _) in
-    unify f u
-  end.
-  apply eq_refl.
-*)
-  match goal with
-    |- _ = ?f _ _ =>
-    unify f (fun v ccs =>
-               let c := @Vector.nth _ 1 ccs Fin.F1 in
-               seqE (ex_coroutine 2)
-                    (fun (n2 : nat)
-                         (c2 : nat ->
-                               t (fun _:yield_effect => nat) (fun _:yield_effect => nat)) =>
-                       (fix
-                          aux (N0 : nat)
-                          (c1
-                             c0 : nat ->
-                                  t (fun _:yield_effect => (args_effect putNat))
-                                    (fun _:yield_effect => nat)) {struct N0} :
-                          t args_effect rets_effect :=
-                          match N0 with
-                          | 0 => Done args_effect rets_effect
-                          | S N' =>
-                            m1 <- resume c1 $ v;
-                            (putN m1; m2 <- resume c0 $ n2; (putN m2; aux N' c1 c0))
-                          end) N c c2))
-  end.
-  simpl.
-  reflexivity.
-  intros.
-  simpl.
-  econstructor.
-  unfold ex_coroutine.
-  match goal with
-    |- _ _ ?init _ =>
-    let u := open_constr:(inl tt) in
-    unify init u
-  end.
-  do 2 eexists.
-  split.
-  match goal with
-    |- ?step _ = _ =>
-    let u := open_constr:(_ ||| _) in
-    unify step u
-  end.
-  simpl.
-  pattern_rhs tt.
-  apply eq_refl.
-  match goal with
-    |- _ _ ?s _ _ =>
-    let u := open_constr:(inr (inl tt)) in
-    unify s u
-  end.
-  econstructor; intros.
-  simpl.
-  pattern_rhs r.
-  apply equal_f.
-  pattern_rhs yield.
-  apply equal_f.
-  match goal with
-    |- ?step _ = _ =>
-    let u := open_constr:(_ ||| _) in
-    unify step u
-  end.
-  simpl.
-  pattern_rhs tt.
-  apply eq_refl.
-  match goal with
-    |- _ _ (?next _ r) _ (?op _ _) =>
-    let u := open_constr:(fun _ r0 => inr (inr (_ r0))) in
-    unify next u;
-      let u := open_constr:(fun _ r => _) in
-      unify op u
-  end.
-  simpl.
-  match goal with
-    |- _ _ (inr (inr (?x _))) _ _ =>
-    match type of x with
-      _ -> ?T =>
-      let u := open_constr:(nat + _) in
-      unify T u
-    end;
-    let u := open_constr:(fun r => inl r) in
-    unify x u
-  end.
-  simpl.
-  econstructor.
-  intros.
-  simpl.
-  dest_step.
-  intros.
-  match goal with
-    |- _ _ (?next _ _) _ (?op _ _) =>
-    let u := open_constr:(fun _ _ => inr (inr (inr tt))) in
-    unify next u;
-      let u := open_constr:(fun _ _ => _) in
-      unify op u
-  end.
-  econstructor.
-  simpl.
-  pattern_rhs tt.
-  apply eq_refl.
-  intros.
-  (*
-  lazymatch goal with
-    |- _ = ?f _ ?ccs0 =>
-    set (ccs := ccs0);
-      replace c with (@Vector.nth _ 2 ccs Fin.F1) by (subst ccs; auto);
-      replace cs with (Vector.tl ccs) by (subst ccs; auto);
-      let u := open_constr:(fun v0 ccs => _) in
-      unify f u
-  end.
-  apply eq_refl.
-*)
-  match goal with
-    |-  _ = ?f _ _ =>
-    unify f (fun v0 ccs =>
-               let c := @Vector.nth _ 2 ccs Fin.F1 in
-               (fix
-                  aux (N0 : nat)
-                  (c1
-                     c0 : nat ->
-                          t (fun _:yield_effect => nat) (fun _:yield_effect => nat))
-                  {struct N0} : t args_effect rets_effect :=
-                  match N0 with
-                  | 0 => Done args_effect rets_effect
-                  | S N' =>
-                    m1 <- resume c1 $ v;
-                    (putN m1; m2 <- resume c0 $ v0; (putN m2; aux N' c1 c0))
-                  end) N (Vector.nth ccs (Fin.FS Fin.F1)) c)
-  end.
-  simpl.
-  apply eq_refl.
-  intros.
-  simpl.
-  match goal with
-    |- _ (?g _) =>
-    pattern g;
-      match goal with
-        |- ?G _ =>
-        unshelve (evar (e : {h | G h});
-        eassert (E := e : {h | G h}))
-      end
-  end.
-  induction N; eexists; simpl.
-  econstructor.
-  set (F := fun ccs : Vector.t _ 2 =>  (fun (m1 : nat)
-          (c1 : nat ->
-                t (fun _:yield_effect => nat) (fun _:yield_effect => nat))
-        =>
-        putN m1;
-        seqE (Vector.nth ccs Fin.F1 v0)
-          (fun (m2 : nat)
-             (c0 : nat ->
-                   t (fun _:yield_effect => nat)
-                     (fun _:yield_effect => nat)) =>
-           putN m2;
-           (fix
-            aux (N0 : nat)
-                (c2
-                 c3 : nat ->
-                      t (fun _:yield_effect => nat)
-                        (fun _:yield_effect => nat)) {struct N0} :
-              t args_effect rets_effect :=
-              match N0 with
-              | 0 => Done args_effect rets_effect
-              | S N' =>
-                  m0 <- resume c2 $ v;
-                  (putN m0; m3 <- resume c3 $ v0; (putN m3; aux N' c2 c3))
-              end) N c1 c0))).
-  match goal with
-    |- _ ?F' (?g _) =>
-    replace F' with (fun ccs : Vector.t _ 2 => seqE (Vector.nth ccs (Fin.FS Fin.F1) v) (F ccs)) by (unfold F; auto);
-      let u := open_constr:(fun v0 => _) in
-      unify g u
-  end.
-  simpl.
-  eapply EPSeq.
-  intros.
-  subst F.
-  cbv beta.
-  match goal with
-    |- _ = ?f _ _ =>
-    unify f (fun v1 cs =>
-               let c := @Vector.nth _ 2 cs (Fin.FS Fin.F1) in
-               (putN v1;
-                seqE (Vector.nth cs Fin.F1 v0)
-                     (fun (m2 : nat)
-                          (c0 : nat ->
-                                t (fun _ : yield_effect => nat) (fun _ : yield_effect => nat)) =>
-                        putN m2;
-                        (fix
-                           aux (N0 : nat)
-                           (c2
-                              c3 : nat ->
-                                   t (fun _ : yield_effect => nat) (fun _ : yield_effect => nat))
-                           {struct N0} : t args_effect rets_effect :=
-                           match N0 with
-                           | 0 => Done args_effect rets_effect
-                           | S N' =>
-                             m0 <- resume c2 $ v;
-                             (putN m0; m3 <- resume c3 $ v0; (putN m3; aux N' c2 c3))
-                           end) N c c0)))
-  end.
-  cbv beta.
-  f_equal.
-  extensionality d.
-  f_equal.
-  apply equal_f.
-  eapply (@Vector.caseS' _ 1 cs).
-  auto.
-  extensionality m.
-  extensionality c0.
-  f_equal.
-  extensionality dummy.
-  f_equal.
-  eapply (@Vector.caseS' _ 1 cs).
-  intros.
-  eapply (@Vector.caseS' _ 0 t0).
-  auto.
-
-  intros.
-  simpl.
-  subst F.
-  set (F := fun cs : Vector.t _ 2 => (fun (m2 : nat)
-          (c0 : nat ->
-                t (fun _ : yield_effect => nat) (fun _ : yield_effect => nat))
-        =>
-        putN m2;
-        (fix
-         aux (N0 : nat)
-             (c2
-              c3 : nat ->
-                   t (fun _ : yield_effect => nat)
-                     (fun _ : yield_effect => nat)) {struct N0} :
-           t args_effect rets_effect :=
-           match N0 with
-           | 0 => Done args_effect rets_effect
-           | S N' =>
-               m0 <- resume c2 $ v;
-               (putN m0; m3 <- resume c3 $ v0; (putN m3; aux N' c2 c3))
-           end) N (Vector.nth cs (Fin.FS Fin.F1)) c0)).
-  match goal with
-    |- _ ?F' (?g _) =>
-    replace F' with (fun ccs : Vector.t _ 2 => putN v1; seqE (Vector.nth ccs Fin.F1 v0) (F ccs)) by (unfold F; auto);
-      let u := open_constr:(fun v0 => _) in
-      unify g u
-  end.
-  simpl.
-  econstructor.
-  intros.
-  match goal with
-    |- _ (fun ss => ?x ss r) =>
-    let u := open_constr:(fun ss r => _) in
-    unify x u
-  end.
-  simpl.
-  econstructor.
-  intros.
-  subst F.
-  cbv beta.
-  match goal with
-    |- _ = ?f _ _ =>
-    unify f (fun v2 (cs:Vector.t _ 2) =>
-               let c := Vector.nth cs Fin.F1 in
-               (putN v2;
-                (fix
-                   aux (N0 : nat)
-                   (c2
-                      c3 : nat ->
-                           t (fun _ : yield_effect => nat) (fun _ : yield_effect => nat))
-                   {struct N0} : t args_effect rets_effect :=
-                   match N0 with
-                   | 0 => Done args_effect rets_effect
-                   | S N' =>
-                     m0 <- resume c2 $ v;
-                     (putN m0; m3 <- resume c3 $ v0; (putN m3; aux N' c2 c3))
-                   end) N (Vector.nth cs (Fin.FS Fin.F1)) c))
-  end.
-  cbv beta.
-  f_equal.
-  extensionality dummy.
-  f_equal.
-  eapply (@Vector.caseS' _ 1 cs).
-  auto.
-  eapply (@Vector.caseS' _ 1 cs).
-  auto.
-
-  intros.
-  subst F.
-  cbv beta.
-  set (F := fun cs :Vector.t _ 2 =>
-      (fix
-       aux (N0 : nat)
-           (c2
-            c3 : nat ->
-                 t (fun _ : yield_effect => nat) (fun _ : yield_effect => nat))
-           {struct N0} : t args_effect rets_effect :=
-         match N0 with
-         | 0 => Done args_effect rets_effect
-         | S N' =>
-             m0 <- resume c2 $ v;
-             (putN m0; m3 <- resume c3 $ v0; (putN m3; aux N' c2 c3))
-         end) N (Vector.nth cs (Fin.FS Fin.F1)) (Vector.nth cs Fin.F1)).
-  match goal with
-    |- _ ?F' (?g _) =>
-    replace F' with (fun cs : Vector.t _ 2 => putN v2; F cs) by (unfold F; auto);
-      let u := open_constr:(fun v0 => _) in
-      unify g u
-  end.
-  simpl.
-  econstructor.
-  intros.
-  subst F.
-  simpl.
-  match goal with
-    |- _ (fun ss => ?X ss r0) =>
-    let u := open_constr:(fun ss r0 => _) in
-    unify X u
-  end.
-  simpl.
-  apply (proj2_sig IHN).
-  simpl.
-  pose (proj2_sig e).
-  unfold e in e0.
-  simpl in e0.
-  apply e0.
+  derive_parent_core.
+  solve_child.
+  derive_parent.
+  derive_parent.
+  solve_child.
+  derive_parent.
+  repeat derive_parent.
 Defined.
 Transparent seqE.
 
-Definition dummy := fun (A:Type)(_:A) => True.
+Print ex_derive_parent.
+Eval cbv [proj1_sig ex_derive_parent] in (fun N => proj1_sig (ex_derive_parent N)).
+
+Ltac my_instantiate ev t :=
+  let H := fresh in
+  pose ev as H;
+  instantiate (1 := t) in (Value of H);
+  subst H.
+
+Definition dummy (A:Type)(x:A) := True.
+
+Ltac derive_core ptr env :=
+  lazymatch goal with
+    |- @equiv' _ ?args ?rets ?state ?step ?st ?prog ?op =>
+    lazymatch prog with
+    | Eff _ _ ?p =>
+      lazymatch st with
+      | ?f ?r =>
+        let fv := free_var prog (env,r) in
+        let u := open_constr:(fun r => _) in
+        unify f u;
+        lazymatch op with
+        | ?g _ =>
+          let u := open_constr:(fun r => _) in
+          unify g u
+        end;
+        simpl;
+        lazymatch goal with
+          |- equiv' _ ?st' _ _ =>
+          let u := open_constr:(ptr (inl fv)) in
+          unify st' u
+        end;
+        eapply Equiv'Eff;
+        [ intros; simpl; dest_step
+        | let fr := fresh in
+          intro fr;
+          derive_core (fun x => ptr (inr x)) (env,fr)
+        ]
+      | _ =>
+        let fv := (*free_var prog*) env in
+        let u := open_constr:(ptr (inl fv)) in
+        unify st u;
+        eapply Equiv'Eff;
+        [ intros; simpl (*; dest_step*)
+        | let fr := fresh in
+          intro fr;
+          derive_core (fun x => ptr (inr x)) (env,fr)
+        ]
+      end
+    | Done _ _ =>
+      lazymatch st with
+      | ?f ?r =>
+        let fv := free_var prog (env,r) in
+        let u := open_constr:(fun r => _) in
+        unify f u;
+        lazymatch op with
+        | ?g _ =>
+          let u := open_constr:(fun r => _) in
+          unify g u
+        end;
+        simpl;
+        lazymatch goal with
+          |- equiv' _ ?st' _ _ =>
+          let u := open_constr:(ptr (inl fv)) in
+          unify st' u
+        end;
+        eapply Equiv'Done;
+        simpl; dest_step
+      | _ =>
+        lazymatch goal with
+          |- equiv' _ ?st' _ _ =>
+          let u := open_constr:(ptr (inl env)) in
+          unify st' u
+        end;
+        eapply Equiv'Done;
+        simpl; dest_step
+      end
+    | match ?z with _ => _ end =>
+      lazymatch type of z with
+      | _ =>
+        match goal with
+          _ : dummy _ |- _ => idtac
+        | _ =>
+        lazymatch st with
+        | ?f ?ag ?rg =>
+          let u := open_constr:(fun ag rg => _) in
+          unify f u;
+          lazymatch op with
+          | ?g _ _ =>
+            let u := open_constr:(fun ag rg => _) in
+            unify g u
+          end
+        | ?f ?r =>
+          let u := open_constr:(fun r => _) in
+          unify f u;
+          lazymatch op with
+          | ?g _ =>
+            let u := open_constr:(fun r => _) in
+            unify g u
+          end
+        | _ => idtac
+        end;
+        cbv beta;
+        lazymatch goal with
+          |- equiv' _ ?st _ ?op =>
+          let s' := fresh in
+          let b := fresh in
+          let u := open_constr:(match z return state with
+                                | Some (s', Some (existT _ _ b)) => _
+                                | _ => _ (*inr (inr (inr (inr tt)))*)
+                                end) in
+          (unify st u || my_instantiate st u);
+          let ty := type of op in
+          let u := open_constr:(match z return ty with
+                                | Some (s', Some (existT _ ef b)) => _
+                                | _ => None
+                                end)
+          in
+          (unify op u || my_instantiate op u);
+          try (let p := fresh in
+          destruct z as [p|];
+          [ let s := fresh in
+            let o := fresh in
+            destruct p as [s o];
+            [ let s0 := fresh in
+              destruct o as [s0|];
+              [ let r := fresh in
+                destruct s0 as [_ r](*;
+                derive_core ptr (env,s,r)*)
+              |]
+            ]
+          |])
+
+        end
+        end
+      end
+    | _ => idtac "end"
+    end
+  end.
 
 Theorem ex_correct : forall N,
     ex N = proj1_sig (ex_derive_parent N) FPNil.
 Proof.
-  unfold ex.
+  unfold ex, Fix.
   simpl.
   destruct N; intros.
   simpl.
@@ -852,26 +792,214 @@ Proof.
   destruct N; simpl; auto.
 Qed.
 
+Lemma derive_parent_rect : forall state A B N a0 b0 P f f0 st0 stS op0 opS step,
+    (forall a, equiv' step (st0 a) (proj1_sig (nat_rect (fun n => {x : B -> A -> t args_effect rets_effect | P a n x}) (f a) (f0 a) 0) b0 a) (op0 a)) ->
+    (forall N0,
+        (forall a, equiv' step (match N0 with O => st0 a | S N0' => stS a N0' end) (proj1_sig (nat_rect (fun n => {x : B -> A -> t args_effect rets_effect | P a n x}) (f a) (f0 a) N0) b0 a) (match N0 with O => op0 a | S N0' => opS a N0' end)) ->
+        (forall a, equiv' step (stS a N0)
+                          (proj1_sig
+                             (f0 a N0
+                                 (nat_rect
+                                    (fun n : nat => {x : B -> A -> t args_effect rets_effect | P a n x}) (f a) (f0 a)
+                                    N0)) b0 a) (opS a N0))) ->
+    @equiv' _ _ _ state step (match N with O => st0 a0 | S N0 => stS a0 N0 end) (proj1_sig (nat_rect (fun n => {x : B -> A -> t args_effect rets_effect | P a0 n x}) (f a0) (f0 a0) N) b0 a0) (match N with O => op0 a0 | S N0 => opS a0 N0 end).
+Proof.
+  intros.
+  revert a0.
+  induction N; intros; auto.
+  simpl.
+  apply H0.
+  intros.
+  apply IHN.
+Qed.
+
 Theorem ex_derive :
   {state & {step & forall N, {init | @equiv _ _ _ state step init (ex N)}}}.
 Proof.
-  set (ty_v := fin_prod
-        (Vector.cons Set (unit + (unit + (nat + unit))) 1
-                     (Vector.cons Set (unit + (unit + (nat + unit))) 0 (Vector.nil Set)))).
-  eexists (nat * ty_v + (unit + (nat * ty_v * (unit + (unit + (nat + unit))) * nat + (nat * ty_v * (unit + (unit + (nat + unit))) * nat * (unit + (unit + (nat + unit))) * nat + unit)))).
+  eexists.
   eexists (?[F] ||| ?[G]).
   intro N.
   rewrite ex_correct.
   unfold ex_derive_parent.
   simpl.
+  eexists ?[init].
   match goal with
-    |- { init | equiv _ _ (_ _ _ ?s)} =>
+    |- equiv _ _ (_ ?s) =>
+    let u := open_constr:(inl (N,s)) in
+    unify ?init u;
     generalize s
   end.
   intros.
-  let u := open_constr:(inl (N,f)) in
-  eexists ?[init];
-    unify ?init u.
+  do 2 eexists.
+  split.
+  simpl.
+  match goal with
+    |- ?F _ = _ =>
+    let u := open_constr:(prod_curry (fun N f => _)) in
+    unify F u
+  end.
+  simpl.
+  apply eq_refl.
+
+  eapply (derive_parent_rect _ _ _ (fun a n x => _) (fun a => _) (fun a => _)); intros.
+  simpl.
+  derive_core open_constr:(fun x => inr x) tt.
+  simpl.
+  derive_core open_constr:(fun x => inr (inr x)) (N0,a).
+  assert (dummy 0) by (unfold dummy; auto).
+  derive_core open_constr:(fun x => inr (inr x)) (N0,a,H3,H6).
+(*
+  lazymatch goal with
+    |- equiv' _ (match ?z with _ => _ end) _ _ =>
+    destruct z
+  end.
+*)
+(*
+  lazymatch goal with
+    |- equiv' _ ?st _ _ =>
+    let u := open_constr:(inr (inr (inl (N0, a, H3, H6)))) in
+    unify st u
+  end.
+  econstructor.
+  intros.
+  simpl.
+ *)
+  match goal with
+    |- ?g _ _ _ = _ =>
+    let u := open_constr:(_ ||| _) in
+    unify g u
+  end.
+  simpl.
+  match goal with
+    |- ?g _ _ _ = _ =>
+    let u := open_constr:(fun '(N0,a,H3,H6) _ _ => _) in
+    unify g u
+  end.
+  simpl.
+  match goal with
+    |- _ = Some (?next _ , ?op _) =>
+    let u := open_constr:(fun r => _) in
+    unify next u;
+      let u := open_constr:(fun r => _) in
+      unify op u
+  end.
+  simpl.
+  apply eq_refl.
+  intros.
+  simpl.
+  lazymatch goal with
+    |- equiv' _ ?st (match ?z with _ => _ end) ?op =>
+    let ty := type of st in
+    let u := open_constr:(match z return ty with
+                     | Some (s', Some (existT _ _ v)) => _ (*inr (inr (inr (inl (N0, a, H3, H6))))*)
+                     | _ => _ (*inr (inr (inr (inr tt)))*)
+                     end)
+    in
+    unify u st;
+      let u := open_constr:(match z with
+                            | Some (_, Some (existT _ _ v)) => _ (*Some (existT args_effect putNat v)*)
+                            | _ => _
+                            end)
+      in
+      instantiate (1 := u);
+        move H after H1;
+        destruct z
+  end.
+  destruct p.
+  destruct o.
+  destruct s0.
+  lazymatch goal with
+    |- equiv' _ ?st _ _ =>
+    let u := open_constr:(inr (inr (inr (inl (N0,a,H3,H6,s,n))))) in
+    unify st u
+  end.
+  eapply Equiv'Eff.
+
+  intros.
+  simpl.
+  match goal with
+    |- ?f ?init _ _ = Some (?next _ , ?op _) =>
+    let u := open_constr:(_ ||| _) in
+    unify f u;
+      let u := open_constr:(fun r => _) in
+      unify next u;
+        let u := open_constr:(fun r => _) in
+        unify op u
+  end.
+  simpl.
+  match goal with
+    |- ?g _ _ _ = ?rhs =>
+    let u := open_constr:(fun '(N0,a,H3,H6,s,n) x r => _) in
+    unify g u
+  end.
+  simpl.
+  lazymatch goal with
+    |- ?lhs = ?rhs =>
+    my_instantiate lhs rhs
+  end.
+  apply eq_refl.
+  intros.
+  lazymatch goal with
+    |- equiv' _ (?next _) _ _ =>
+    let u0 := open_constr:(fun r => _) in
+    unify next u0
+  end.
+  simpl in *.
+  apply H.
+  lazymatch goal with
+    |- equiv' _ ?st _ _ =>
+    let ty := type of st in
+    unify st (inr (inr (inr (inr tt))) : ty)
+  end.
+  econstructor.
+  simpl.
+  pattern_rhs tt.
+  apply eq_refl.
+  lazymatch goal with
+    |- equiv' _ ?st _ _ =>
+    let ty := type of st in
+    unify st (inr (inr (inr (inr tt))) : ty)
+  end.
+  econstructor.
+  simpl.
+  auto.
+  lazymatch goal with
+    |- equiv' _ ?st _ _ =>
+    let ty := type of st in
+    unify st (inr (inr (inr (inr tt))) : ty)
+  end.
+  econstructor. auto.
+  lazymatch goal with
+    |- equiv' _ ?st _ _ =>
+    let ty := type of st in
+    unify st (inr (inr (inr (inr tt))) : ty)
+  end.
+  econstructor. auto.
+  Grab Existential Variables.
+  all: exact unit.
+Defined.
+
+(*
+Theorem ex_derive :
+  {state & {step & forall N, {init | @equiv _ _ _ state step init (ex N)}}}.
+Proof.
+  set (ty_v := fin_prod
+        (Vector.cons Set (unit + (unit + (unit * nat * nat + unit))) 1
+                     (Vector.cons Set (unit + (unit + (unit * nat * nat + unit))) 0 (Vector.nil Set)))).
+  exists (nat * ty_v + (unit + (nat * ty_v * (unit + (unit + (unit * nat * nat + unit))) * nat + (nat * ty_v * (unit + (unit + (unit * nat * nat + unit))) * nat * (unit + (unit + (unit * nat * nat + unit))) * nat + unit)))).
+  eexists (?[F] ||| ?[G]).
+  intro N.
+  rewrite ex_correct.
+  unfold ex_derive_parent.
+  simpl.
+  eexists ?[init].
+  match goal with
+    |- equiv _ _ (_ ?s) =>
+    let u := open_constr:(inl (N,s)) in
+    unify ?init u;
+    generalize s
+  end.
+  intros.
   do 2 eexists.
   split.
   simpl.
@@ -883,7 +1011,8 @@ Proof.
   simpl.
   apply eq_refl.
 
-  match goal with
+  eapply (derive_parent_rect _ _ _ (fun n x => _)).
+  lazymatch goal with
     |- equiv' _ ?s _ ?op =>
     let u := open_constr:(match N with
                           | O => _
@@ -921,8 +1050,8 @@ Proof.
                      end) in
     unify st u;
       let ty := type of op in
-      let u := constr:(match z return ty with
-                        | Some (s', Some (existT _ ef a)) => Some (existT args_effect putNat a)
+      let u := open_constr:(match z return ty with
+                        | Some (s', Some (existT _ ef a)) => _ (*Some (existT args_effect putNat a)*)
                         | _ => None
                        end)
       in
@@ -942,10 +1071,10 @@ Proof.
   end.
   simpl.
   match goal with
-    |- _ = Some (?next _ _ , ?op _ _) =>
-    let u := open_constr:(_ ||| (_ ||| ((fun '(N,f,s,n) r => _) ||| _))) in
+    |- _ = Some (?next _ , ?op _) =>
+    let u := open_constr:(fun r => _) in
     unify next u;
-      let u := open_constr:(_ ||| (_ ||| ((fun '(N,f,s,n) r => _) ||| _))) in
+      let u := open_constr:(fun r => _) in
       unify op u
   end.
   apply eq_refl.
@@ -954,15 +1083,15 @@ Proof.
   lazymatch goal with
     |- equiv' _ ?st (match ?z with _ => _ end) ?op =>
     let ty := type of st in
-    let u := constr:(match z return ty  with
+    let u := constr:(match z return ty with
                      | Some (s', Some (existT _ _ a)) => inr (inr (inr (inl (N, f, s, n, s', a))))
                      | _ => inr (inr (inr (inr tt)))
-                          end)
+                     end)
     in
     unify st u;
-      let u := constr:(match z with
-                            | Some (_, Some (existT _ _ v)) => Some (existT args_effect putNat v)
-                            | _ => None
+      let u := open_constr:(match z with
+                            | Some (_, Some (existT _ _ v)) => _ (*Some (existT args_effect putNat v)*)
+                            | _ => _
                             end)
       in
       instantiate (1 := u);
@@ -975,20 +1104,20 @@ Proof.
   intros.
   simpl.
   match goal with
-    |- ?f _ _ _ = Some (?next _ _ , ?op _ _) =>
+    |- ?f ?init _ _ = Some (?next _ , ?op _) =>
     let u := open_constr:(_ ||| _) in
     unify f u;
-      let u := open_constr:(_ ||| (_ ||| (_ ||| ((fun x r => _) ||| _)))) in
+      let u := open_constr:(fun r => _) in
       unify next u;
-        let u := open_constr:(_ ||| (_ ||| (_ ||| ((fun x r => _) ||| _)))) in
+        let u := open_constr:(fun r => _) in
         unify op u
   end.
   simpl.
   all: swap 1 2.
   intros.
   lazymatch goal with
-    |- equiv' _ (?next _ _) _ _ =>
-    let u0 := open_constr:(fun s r => _) in
+    |- equiv' _ (?next _) _ _ =>
+    let u0 := open_constr:(fun r => _) in
     unify next u0
   end.
   simpl.
@@ -1014,8 +1143,6 @@ Proof.
   auto.
   econstructor. auto.
   econstructor. auto.
-  Grab Existential Variables.
-  all: intros; (exact None || exact (inr (inl tt)) || idtac).
 Defined.
 
-Eval cbv in (projT1 (projT2 ex_derive)).
+Eval cbv in (projT1 (projT2 ex_derive)).*)
