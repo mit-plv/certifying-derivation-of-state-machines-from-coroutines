@@ -875,7 +875,7 @@ Proof.
     let u := open_constr:(fun '(N0,a,H3,H6) _ _ => _) in
     unify g u
   end.
-  simpl.
+  cbv beta.
   match goal with
     |- _ = Some (?next _ , ?op _) =>
     let u := open_constr:(fun r => _) in
@@ -902,7 +902,6 @@ Proof.
                             end)
       in
       instantiate (1 := u);
-        move H after H1;
         destruct z
   end.
   destruct p.
