@@ -80,87 +80,53 @@ Definition get_put : t args_effect rets_effect :=
   putN (S n);
     Done _ _.
 
-Inductive fin_prod : forall n, Vector.t Type n -> Type :=
-| FPNil : fin_prod (Vector.nil Type)
-| FPCons : forall t n (ts : Vector.t Type n), t -> fin_prod ts -> fin_prod (Vector.cons _ t _ ts).
-
-Definition caseS'_fp n t (ts : Vector.t Type n)(v : fin_prod (Vector.cons _ t _ ts)) :
-  forall (P : fin_prod (Vector.cons _ t _ ts) -> Type)
-         (H : forall h hs, P (@FPCons t n ts h hs)), P v :=
-  (fun v0 : fin_prod (Vector.cons Type t n ts) =>
- match
-   v0 as v1 in (@fin_prod n0 iV)
-   return
-     (match iV as iV0 in (Vector.t _ n1) return (fin_prod iV0 -> Type) with
-      | Vector.nil _ =>
-          fun _ : fin_prod (Vector.nil Type) => forall x : Type, x -> x
-      | Vector.cons _ t0 n1 ts0 =>
-          fun v2 : fin_prod (Vector.cons Type t0 n1 ts0) =>
-          forall P : fin_prod (Vector.cons Type t0 n1 ts0) -> Type,
-          (forall (h : t0) (hs : fin_prod ts0), P (FPCons h hs)) -> P v2
-      end v1)
- with
- | FPNil => fun (A : Type) (x : A) => x
- | @FPCons t0 n0 ts0 h hs =>
-     fun (P : fin_prod (Vector.cons Type t0 n0 ts0) -> Type)
-       (X : forall (h0 : t0) (hs0 : fin_prod ts0), P (FPCons h0 hs0)) => 
-     X h hs
- end) v.
-
-Fixpoint nth_fp m (types : Vector.t Type m)(p : fin_prod types) n : Vector.nth types n :=
-  match n in Fin.t k return
-        forall (types : Vector.t Type k),
-          fin_prod types -> Vector.nth types n with
-  | @Fin.F1 s =>
-    fun (types : Vector.t Type (S s)) =>
-      Vector.caseS'
-        types
-        (fun types => fin_prod types -> Vector.nth types Fin.F1)
-        (fun t ts =>
-           fun (p : fin_prod (Vector.cons _ t _ ts)) =>
-             caseS'_fp p _ (fun (h:t)(_:fin_prod ts) => h))
-  | @Fin.FS s n' =>
-    fun (types : Vector.t  Type (S s)) =>
-      Vector.caseS'
-        types
-        (fun types => fin_prod types -> Vector.nth types (Fin.FS n'))
-        (fun t ts =>
-           fun (p : fin_prod (Vector.cons _ t  _ ts)) =>
-             caseS'_fp p _ (fun (_:t)(hs:fin_prod ts) =>
-                              nth_fp hs n'))
-  end types p.
-
-Fixpoint replace_fp n (types : Vector.t Type n)(p : fin_prod types) k (a0 : Vector.nth types k) :=
-  match k in Fin.t m return
-        forall (types:Vector.t Type m),
-          fin_prod types -> Vector.nth types k -> fin_prod types with
-  | @Fin.F1 m =>
-    fun (types : Vector.t Type (S m)) =>
-      Vector.caseS'
-        types
-        (fun types =>
-           fin_prod types -> Vector.nth types Fin.F1 -> fin_prod types)
-        (fun t ts =>
-           fun (p : fin_prod (Vector.cons _ t _ ts)) a0 =>
-             caseS'_fp p _
-                       (fun (h:t)(hs:fin_prod ts) => FPCons a0 hs))
-  | @Fin.FS m k' =>
-    fun (types : Vector.t Type (S m)) =>
-      Vector.caseS'
-        types
-        (fun types =>
-           fin_prod types -> Vector.nth types (Fin.FS k') -> fin_prod types)
-        (fun t ts =>
-           fun (p : fin_prod (Vector.cons _ t _ ts)) a0 =>
-             caseS'_fp p _ (fun (h:t)(hs:fin_prod ts) =>
-                              FPCons h (replace_fp hs k' a0)))
-  end types p a0.
-
 Definition seqE' A state (x : option (state * option { e : yield_effect & A })) (f : state -> A -> t args_effect rets_effect)(f0 : t args_effect rets_effect) :=
   match x with
   | Some (s, Some (existT _ _ v)) => f s v
   | _ => f0
   end.
+
+Fixpoint fin_prod n : Vector.t Type n -> Type :=
+  match n as n0 return Vector.t Type n0 -> Type with
+  | O => fun _ => unit
+  | S n' =>
+    fun types => Vector.caseS' types _ (fun t rest => fin_prod rest * t)
+  end.
+
+Fixpoint nth_fp n (types : Vector.t Type n)(v : fin_prod types) k : Vector.nth types k :=
+  match k in Fin.t m
+        return forall (types : Vector.t Type m),
+      fin_prod types -> Vector.nth types k with
+  | @Fin.F1 m =>
+    fun (types : Vector.t Type (S m)) =>
+      Vector.caseS' types
+                    (fun types => fin_prod types -> Vector.nth types Fin.F1)
+                    (fun t ts =>
+                       fun v : fin_prod (Vector.cons _ t _ ts) => snd v)
+  | @Fin.FS m k' =>
+    fun (types : Vector.t Type (S m)) =>
+      Vector.caseS' types
+                    (fun types => fin_prod types -> Vector.nth types (Fin.FS k'))
+                    (fun t ts =>
+                       fun v : fin_prod (Vector.cons _ t _ ts) => nth_fp ts (fst v) k')
+  end types v.
+
+Fixpoint replace_fp n (types : Vector.t Type n)(v : fin_prod types) k (a0 : Vector.nth types k) : fin_prod types :=
+  match k in Fin.t m return
+        forall types : Vector.t Type m,
+          fin_prod types -> Vector.nth types k -> fin_prod types
+  with
+  | @Fin.F1 m =>
+    fun types : Vector.t Type (S m) =>
+      Vector.caseS' types
+                    (fun types => fin_prod types -> Vector.nth types Fin.F1 -> fin_prod types)
+                    (fun t ts v a0 => (fst v, a0))
+  | @Fin.FS m k' =>
+    fun types : Vector.t Type (S m) =>
+      Vector.caseS' types
+                    (fun types => fin_prod types -> Vector.nth types (Fin.FS k') -> fin_prod types)
+                    (fun t ts v a0 => (replace_fp ts (fst v) k' a0, snd v))
+  end types v a0.
 
 Inductive equiv_parent A B :
   forall n (states : Vector.t Type n),
@@ -170,20 +136,20 @@ Inductive equiv_parent A B :
     Prop :=
 | EPDone : forall n states
                   (steps : forall k : Fin.t n, step_type (fun _:yield_effect => A) (fun _:yield_effect => B) (Vector.nth states k)),
-    equiv_parent steps (fun _ => Done _ _) (fun _ => Done _ _)
+    equiv_parent _ steps (fun _ => Done _ _) (fun _ => Done _ _)
 | EPEff : forall n states
                  (steps : forall k : Fin.t n, step_type (fun _:yield_effect => A) (fun _:yield_effect => B)(Vector.nth states k))
                  e a f g,
-    (forall r, equiv_parent steps (fun cs => f cs r) (fun ss => g ss r)) ->
-    equiv_parent steps (fun cs => Eff e a (f cs)) (fun ss => Eff e a (g ss))
+    (forall r, equiv_parent _ steps (fun cs => f cs r) (fun ss => g ss r)) ->
+    equiv_parent _ steps (fun cs => Eff e a (f cs)) (fun ss => Eff e a (g ss))
 | EPSeq :forall n states x k f f' g
                 (steps : forall k : Fin.t n, step_type (fun _:yield_effect => A) (fun _:yield_effect => B) (Vector.nth states k)),
     (forall v cs c, f' cs v c = f v (Vector.replace cs k c)) ->
     (forall v, @equiv_parent _ _ n states steps (f v) (g v)) ->
-    equiv_parent steps
+    equiv_parent _ steps
         (fun cs => seqE (Vector.nth cs k x) (f' cs))
         (fun ss =>
-           seqE' (steps k (nth_fp ss k) yield x) (fun s' v => g v (replace_fp ss k s')) (Done _ _))
+           seqE' (steps k (nth_fp _ ss k) yield x) (fun s' v => g v (replace_fp _ ss k s')) (Done _ _))
 | EPSpawn :
     forall n c f f' x state' states
            (steps : forall k : Fin.t n, step_type (fun _:yield_effect => A) (fun _:yield_effect => B) (Vector.nth states k))
@@ -191,17 +157,33 @@ Inductive equiv_parent A B :
       equiv step init (c x) ->
     (forall v cs c, f' cs v c = f v (Vector.cons _ c _  cs)) ->
       (forall v,
-          equiv_parent (fun k : Fin.t (S n) =>
+          equiv_parent _ (fun k : Fin.t (S n) =>
                           Fin.caseS' k (fun k => step_type (fun _:yield_effect => A)(fun _:yield_effect => B) (Vector.nth (Vector.cons _ state' _ states) k)) step (fun k' => steps k'))
                        (f v)
                        (g v)) ->
-    equiv_parent steps
+    equiv_parent _ steps
         (fun cs => seqE (c x) (f' cs))
         (fun ss =>
-           seqE' (step init yield x) (fun s' v => g v (FPCons s' ss)) (Done _ _)).
+           seqE' (step init yield x) (fun s' v => g v (ss, s')) (Done _ _)).
 
-  
-  
+Lemma equiv_parent_sum :
+  forall A B C D n (states : Vector.t Type n) fa fb ga gb steps (x : A + B),
+    (forall a, equiv_parent states steps (fun cs => fa cs a) (fun ss => ga ss a)) ->
+    (forall b, equiv_parent states steps (fun cs => fb cs b) (fun ss => gb ss b)) ->
+    @equiv_parent C D n states steps
+                  (fun cs => match x with
+                             | inl a => fa cs a
+                             | inr b => fb cs b
+                             end)
+                  (fun ss => match x with
+                             | inl a => ga ss a
+                             | inr b => gb ss b
+                             end).
+Proof.
+  intros.
+  destruct x; auto.
+Qed.
+
 Lemma equiv_parent_nat_rect :
   forall A B n (states : Vector.t Type n) X Y f f0 g g0 steps
          (x : Vector.t (B -> t (fun _:yield_effect => A)(fun _:yield_effect => B)) n -> X)
@@ -212,7 +194,7 @@ Lemma equiv_parent_nat_rect :
                       (fun cs => nat_rect (fun X => _) (f cs) (f0 cs) N (x cs))
                       (fun ss => nat_rect (fun Y => _) (g ss) (g0 ss) N (y ss))) ->
         (forall x y,
-            equiv_parent steps
+            equiv_parent _ steps
                          (fun cs => nat_rect _ (f cs) (f0 cs) (S N) (x cs))
                          (fun ss => nat_rect _ (g ss) (g0 ss) (S N) (y ss)))) ->
   @equiv_parent A B n states steps
@@ -517,46 +499,47 @@ Proof.
 Qed.
 
 Lemma nth_replace_fp : forall n (types: Vector.t Type n) (fp: fin_prod types) k c,
-    nth_fp (replace_fp fp k c) k = c.
+    nth_fp _ (replace_fp _ fp k c) k = c.
 Proof.
   intros.
   revert fp.
   induction k; intros.
   revert c fp.
   apply (Vector.caseS' types); intros.
-  apply (caseS'_fp fp).
-  intros.
-  simpl.
+  simpl in *.
+  destruct fp.
   auto.
   revert c fp.
   apply (Vector.caseS' types); intros.
-  apply (caseS'_fp fp).
-  intros.
-  simpl.
+  simpl in *.
+  destruct fp.
   auto.
 Qed.
 
 Lemma nth_replace_fp_other : forall n (types: Vector.t Type n) (fp: fin_prod types) k k0 c,
     k <> k0 ->
-    nth_fp (replace_fp fp k c) k0 = nth_fp fp k0.
+    nth_fp _ (replace_fp _ fp k c) k0 = nth_fp _ fp k0.
 Proof.
   intros n types fp k k0.
   revert types fp.
   apply (Fin.rect2 (fun n k k0 =>
                       forall types fp (c : Vector.nth types k),
-                        k <> k0 -> nth_fp (replace_fp fp k c) k0 = nth_fp fp k0)).
+                        k <> k0 -> nth_fp _ (replace_fp _ fp k c) k0 = nth_fp _ fp k0)).
   congruence.
   intros n0 f types.
   apply (Vector.caseS' types); intros.
-  apply (caseS'_fp fp); intros.
+  simpl in fp.
+  destruct fp.
   auto.
   intros n0 f types.
   apply (Vector.caseS' types); intros.
-  apply (caseS'_fp fp); intros.
+  simpl in fp.
+  destruct fp.
   auto.
   intros n0 f g H types.
   apply (Vector.caseS' types); intros.
-  apply (caseS'_fp fp); intros.
+  simpl in fp.
+  destruct fp.
   simpl.
   apply H.
   congruence.
@@ -574,6 +557,7 @@ Ltac vec_replace v :=
     | |- context[Vector.nth v' ?k'] =>
       replace (Vector.nth v' k') with (Vector.nth vec k') by
           (unfold vec; rewrite nth_replace_other; congruence)
+    | _ => idtac
     end
   | _ =>
     lazymatch type of v with
@@ -602,7 +586,7 @@ Ltac vec_replace v :=
 
 Ltac prog_eq :=
   lazymatch goal with
-    |- _ _ _ = ?f _ ?ccs =>
+    |- _ = ?f _ ?ccs =>
     vec_replace ccs;
     let u := open_constr:(fun v ccs0 => _) in
     unify f u;
@@ -610,7 +594,7 @@ Ltac prog_eq :=
   end.
 
 Ltac derive_parent_core :=
-  lazymatch goal with
+  (lazymatch goal with
   | |- _ (?g _) =>
     let u := open_constr:(fun v0 => _) in
     unify g u
@@ -619,54 +603,9 @@ Ltac derive_parent_core :=
     unify x u
   | _ => idtac
   end;
-  simpl;
-  econstructor.
+  cbv beta;
+  econstructor || eapply (EPEff putNat)) || econstructor.
 
-Ltac derive_parent_fix :=
-  lazymatch goal with
-    |- _ (fun ss => Fix _ ?N) (?g _) =>
-    unfold Fix;
-    pattern g;
-      match goal with
-        |- ?G _ =>
-        let e := fresh in
-        unshelve (evar (e : {h | G h});
-                  eassert (E := e : {h | G h}));
-          [|
-           simpl;
-           let e0 := fresh in
-           pose (proj2_sig e) as e0;
-           unfold e in e0;
-           simpl in e0;
-           apply e0
-          ]
-      end;
-      induction N; eexists; simpl
-  end.
-
-Ltac solve_child :=
-  match goal with
-    |- equiv _ _ ?x =>
-    let y := eval red in x in
-        change x with y
-  end;
-  derive_child tt.
-
-Ltac derive_parent :=
-  intros;
-  derive_parent_core
-  || (simpl; derive_parent_fix)
-  || prog_eq
-  || (
-    simpl;
-    lazymatch goal with
-      |- _ (fun ss => ?X ss _) =>
-      let u := open_constr:(fun ss r0 => _) in
-      unify X u
-    end;
-    repeat lazymatch goal with
-           | H : {h | _} |- _ => apply (proj2_sig H)
-           end).
 
 Definition nat_rect_sig A (P : nat -> A -> Prop) (f0 : A) :
     P 0 f0 ->
@@ -685,14 +624,14 @@ Proof.
 Defined.
 
 
-Definition ex_coroutine n : t (fun _:yield_effect => nat) (fun _:yield_effect => nat):=
-  m <- yield (S n);
+Definition ex_coroutine k n : t (fun _:yield_effect => nat) (fun _:yield_effect => nat):=
+  m <- yield (k + n)%nat;
     _ <- yield (n + m)%nat;
     Done _ _.
 
 Definition ex N :=
-  let c1 := ex_coroutine in
-  let c2 := ex_coroutine in
+  let c1 := ex_coroutine 2 in
+  let c2 := ex_coroutine 3 in
   n1 <- resume c1 $ 1;
     n2 <- resume c2 $ 2;
     nat_rect _ (fun _ _ => Done args_effect rets_effect)
@@ -702,6 +641,70 @@ Definition ex N :=
                   m2 <- resume c2 $ n2;
                   putN m2;
                   rec c1 c2) N c1 c2.
+
+  
+Ltac derive_parent_fix :=
+  lazymatch goal with
+    |- _ (?g _) =>
+    let u := open_constr:(fun v0 => _) in
+    unify g u
+  end;
+  cbv beta;
+  lazymatch goal with
+  | |- _ (fun ccs => nat_rect _ _ _ ?N _ _) _ =>
+    lazymatch goal with
+      |- _ ?g =>
+      pattern N, g
+    end;
+    lazymatch goal with
+      |- ?G _ ?g =>
+      let e := fresh in
+      unshelve (evar (e : {h | G N h});
+                eassert (E := e : {h | G N h}));
+      [|
+       simpl;
+       let e0 := fresh in
+       pose (proj2_sig e) as e0;
+       unfold e in e0;
+       simpl in e0;
+       apply e0
+      ]
+    end;
+    eapply (nat_rect_sig _ _); simpl
+  end.
+
+Ltac solve_child :=
+  match goal with
+    |- equiv _ _ ?x =>
+    let y := eval red in x in
+        change x with y
+  end;
+  derive_child tt.
+
+Ltac derive_parent :=
+  intros;
+  progress derive_parent_core
+  || (lazymatch goal with
+        |- _ (fun ss => ?X ss _) =>
+        let u := open_constr:(fun ss r0 => _) in
+        unify X u
+      end;
+      cbv beta;
+      repeat lazymatch goal with
+             | H : equiv_parent _ _ _ _ |- _ => apply H
+             end)
+  || derive_parent_fix
+  || eapply equiv_parent_sum
+  || prog_eq.
+
+Lemma ex_coroutine_derive k n :
+  { state & { step & { init | @equiv  _ _ _ state step init (ex_coroutine k n) }}}.
+Proof.
+  eexists.
+  eexists.
+  eexists.
+  solve_child.
+Defined.
 
 Opaque seqE.
 Theorem ex_derive_parent :
@@ -713,68 +716,9 @@ Proof.
   unfold ex.
   intros.
   eexists.
-  econstructor.
-  solve_child.
-  intros.
-  prog_eq.
-  intros.
-  econstructor.
-  solve_child.
-  intros.
-  prog_eq.
-  intros.
-  lazymatch goal with
-    |- _ (?g _) =>
-    let u := open_constr:(fun v0 => _) in
-    unify g u
-  end.
-  cbv beta.
-  lazymatch goal with
-    |- _ ?g =>
-    pattern N, g
-  end.
-  lazymatch goal with
-    |- ?G _ ?g =>
-    let e := fresh in
-    unshelve (evar (e : {h | G N h});
-              eassert (E := e : {h | G N h}));
-          [|
-           simpl;
-           let e0 := fresh in
-           pose (proj2_sig e) as e0;
-           unfold e in e0;
-           simpl in e0;
-           apply e0
-          ]
-  end.
-  eapply (nat_rect_sig _ _).
-  simpl.
-  econstructor.
-  intros.
-  eexists.
-  simpl.
-  intros.
-  derive_parent_core.
-  intros.
-  prog_eq.
-  intros.
-  derive_parent_core.
-  intros.
-  derive_parent_core.
-  intros.
-  prog_eq.
-  intros.
-  derive_parent_core.
-  intros.
-  lazymatch goal with
-    |- _ (fun ss => ?X ss _) =>
-    let u := open_constr:(fun ss r0 => _) in
-    unify X u
-  end.
-  cbv beta.
-  apply H.
+  repeat (solve_child || derive_parent).
 Defined.
-Eval simpl in (fun N => proj1_sig (ex_derive_parent N)).
+Eval cbv -[nat_rect] in (fun N => proj1_sig (ex_derive_parent N)).
 
 Transparent seqE.
 
@@ -782,10 +726,10 @@ Lemma equiv_parent_eq_general : forall A B n states steps f g,
     @equiv_parent A B n states steps f g ->
     forall cs ss,
       (forall k x next op,
-          steps k (nth_fp ss k) yield x = Some (next, op) ->
+          steps k (nth_fp _ ss k) yield x = Some (next, op) ->
           equiv' (steps k) next (Vector.nth cs k x) op) ->
       (forall k x,
-          steps k (nth_fp ss k) yield x = None ->
+          steps k (nth_fp _ ss k) yield x = None ->
           Vector.nth cs k x = Done _ _) ->
       f cs = g ss.
 Proof.
@@ -795,7 +739,7 @@ Proof.
   f_equal.
   extensionality r.
   auto.
-  destruct (steps k (nth_fp ss k) yield x) eqn:?.
+  destruct (steps k (nth_fp _ ss k) yield x) eqn:?.
   simpl.
   destruct p.
   destruct o.
@@ -926,7 +870,7 @@ Ltac st_op_to_ev :=
   end.
 
 Theorem ex_correct : forall N,
-    ex N = proj1_sig (ex_derive_parent N) FPNil.
+    ex N = proj1_sig (ex_derive_parent N) tt.
 Proof.
   intros.
   set (x := fun _ => ex N).
@@ -955,6 +899,26 @@ Proof.
   apply H0.
   intros.
   apply IHN.
+Qed.
+
+Lemma derive_sum : forall eff args rets A B state (x : A + B) fa fb sta stb opa opb step,
+    (forall a, equiv' step (sta a) (fa a) (opa a)) ->
+    (forall b, equiv' step (stb b) (fb b) (opb b)) ->
+    @equiv' eff args rets state step (match x with
+                              | inl a => sta a
+                              | inr b => stb b
+                              end)
+            (match x with
+             | inl a => fa a
+             | inr b => fb b
+             end)
+            (match x with
+             | inl a => opa a
+             | inr b => opb b
+             end).
+Proof.
+  intros.
+  destruct x; auto.
 Qed.
 
 Lemma derive_seqE' : forall A state state' (x : option (state' * option { _ : yield_effect & A })) f f0 g g0 h h0 step,
@@ -1029,9 +993,13 @@ Ltac dest_step' :=
                                 end) ef);
             replace rhs with tmp by (unfold tmp; auto);
             subst tmp
+        | yield =>
+          set (tmp := (fun _ => rhs) yield);
+          replace rhs with tmp by (unfold tmp; auto);
+          subst tmp
         end
       end;
-      apply equal_f_dep;
+      (apply equal_f_dep || apply equal_f);
       simpl;
       repeat (dest_sum; simpl);
       unify_fun
@@ -1059,6 +1027,22 @@ Ltac derive_core ptr env :=
         intros s v;
         derive_core ptr (env,s,v)
        |]
+    | (match ?x with _ => _ end) =>
+      lazymatch type of x with
+      | _ + _ =>
+        eapply (derive_sum _ _ _ (fun a => _) (fun b => _) (fun a => _) (fun b => _));
+        [ let a := fresh in
+          intro a;
+          simpl;
+          let ptr := next_ptr in
+          derive_core ptr (env,a)
+        | let b := fresh in
+          intro b;
+          simpl;
+          let ptr := next_ptr in
+          derive_core ptr (env,b)
+        ]
+      end
     | nat_rect _ _ _ _ _ =>
       (now eauto)
       || (eapply (derive_parent_rect _ _ (fun a b => _) (fun a => _) (fun a => _));
@@ -1078,19 +1062,31 @@ Ltac derive_core ptr env :=
     end
   end.
 
-Ltac derive env :=
+Ltac derive_rec env :=
   let N := fresh in
   eexists;
   eexists;
   intro N;
   eexists ?[init];
   lazymatch goal with
-    |- equiv _ _ ?p =>
+    |- equiv _ _ ?prog =>
+    let H := fresh in
+    eassert (equiv_parent (Vector.nil Set)
+                          (fun p : Fin.t 0 =>
+                             Fin.case0
+                               (fun k : Fin.t 0 =>
+                                  step_type (fun _ : yield_effect => nat) (fun _ : yield_effect => nat)
+                                            (Vector.nth (Vector.nil Set) k)) p)
+                          (fun
+                              _ : Vector.t
+                                    (nat ->
+                                     t (fun _ : yield_effect => nat) (fun _ : yield_effect => nat)) 0
+                            => prog) _) as H by (repeat (solve_child || derive_parent));
     let tmp := fresh in
-    eset (tmp := fun _: Vector.t _ 0 => p);
-      replace p with (tmp (Vector.nil _)) by (unfold tmp; auto);
+    eset (tmp := fun _: Vector.t _ 0 => prog);
+      replace prog with (tmp (Vector.nil _)) by (unfold tmp; auto);
       subst tmp;
-      erewrite equiv_parent_eq by (apply (proj2_sig (ex_derive_parent N)))
+      erewrite equiv_parent_eq by (apply H)
   end;
   simpl;
   match goal with
@@ -1109,11 +1105,124 @@ Ltac derive env :=
     apply eq_refl || (pattern_rhs tt; apply eq_refl)
   ].
 
+Ltac derive_child' env :=
+  match goal with
+    |- equiv _ _ ?x =>
+    let y := eval red in x in
+        change x with y
+  end;
+  simpl;
+  match goal with
+    |- _ _ ?init _ =>
+    let u := open_constr:(inl env) in
+    unify init u
+  end;
+  repeat eexists;
+  [ dest_sum; simpl; unify_fun
+  | derive_core open_constr:(fun x => inr x) tt
+  ].
+  
 Theorem ex_derive :
   {state & {step & forall N, {init | @equiv _ _ _ state step init (ex N)}}}.
 Proof.
-  unshelve derive tt;
-    exact unit || exact FPNil.
+  unshelve derive_rec tt;
+    exact unit || exact tt.
 Defined.
 
 Eval cbv [prod_curry sum_merge ex_derive projT1 projT2] in projT1 (projT2 ex_derive).
+
+Definition ex2_coroutine (fuel : nat) : nat + unit -> t (fun _:yield_effect => nat + unit) (fun _:yield_effect => nat + unit)  :=
+  nat_rect _
+           (fun _ _ => Done _ _)
+           (fun fuel' rec accum i =>
+              match i with
+              | inl k => i' <- yield (inr tt);
+                           rec (accum + k)%nat i'
+              | inr _ => i' <- yield (inl accum); rec accum i'
+              end)
+           fuel 0.
+
+Definition ex2 : t args_effect rets_effect :=
+  let c := ex2_coroutine 5 in
+  k <- getN;
+    _ <- resume c $ (inl k);
+    m <- getN;
+    _ <- resume c $ (inl m);
+    x <- resume c $ (inr tt);
+    match x with
+    | inl n => putN n; Done _ _
+    | inr _ => Done _ _
+    end.
+
+Opaque seqE.
+(*
+Theorem ex2_derive_parent :
+  {g | @equiv_parent _ _ 0 (Vector.nil _)
+                               (fun p => Fin.case0 (fun k => step_type (fun _:yield_effect => nat + unit) (fun _:yield_effect => nat + unit) (Vector.nth _ k)) p)
+                               (fun _ => ex2)
+                               g}.
+Proof.
+  unfold ex2.
+  eexists.
+  unshelve (repeat (intros; (derive_child' tt || derive_parent)));
+  exact (fun _ _ _ => None) ||
+  exact unit.
+Defined.*)
+
+Ltac derive env :=
+  eexists;
+  eexists;
+  eexists (inl tt);
+  lazymatch goal with
+    |- equiv _ _ ?prog =>
+    let H := fresh in
+    eassert (@equiv_parent _ _ 0 (Vector.nil _)
+                           (fun p => Fin.case0 (fun k => step_type (fun _:yield_effect => nat + unit) (fun _:yield_effect => nat + unit) (Vector.nth _ k)) p)
+                           (fun _ => prog)
+                           _) as H by
+          (unshelve (repeat (intros; (derive_child' tt || derive_parent)));
+           exact (fun _ _ _ => None) || exact unit);
+    let tmp := fresh in
+    eset (tmp := fun _: Vector.t _ 0 => prog);
+      replace prog with (tmp (Vector.nil _)) by (unfold tmp; auto);
+      subst tmp;
+      erewrite equiv_parent_eq by (apply H)
+  end;
+  simpl;
+  repeat eexists;
+  [ dest_sum; simpl; unify_fun
+  | derive_core open_constr:(fun x => inr x) tt;
+    let ptr := next_ptr in
+    eapply (Equiv'Done _ (ptr tt));
+    simpl;
+    apply eq_refl || (pattern_rhs tt; apply eq_refl)
+  ].
+
+Theorem ex2_derive :
+  { state & { step & { init | @equiv _ _ _ state step init ex2 } } }.
+Proof.
+  unshelve derive tt; simpl; intros; (exact None || exact unit || exact tt).
+Defined.
+
+Inductive deposit_or_tock (A B : Type) :=
+  Start : t (fun _:yield_effect => A)(fun _:yield_effect => B) -> deposit_or_tock A B
+| Tock : nat -> deposit_or_tock A B.
+
+Fixpoint always_tock_0 A B (shep : deposit_or_tock A B -> t (fun _:yield_effect => unit)(fun _:yield_effect => deposit_or_tock A B)) fuel :=
+  match fuel with
+  | O => Done _ _
+  | S n' =>
+    c <- resume shep $ (Tock _ _ 0);
+      always_tock_0 shep n'
+  end.
+
+Definition shephard A B fuel (rq : deposit_or_tock A B) :=
+  fix aux inprogress fuel :=
+    match fuel with
+    | O => Done
+    | S fuel' =>
+      match rq with
+      | Start coro =>
+        aux (coro::inprogrss) fuel'
+      | Tock i =>
+        nth i inprogress 
