@@ -1,10 +1,9 @@
 Require String.
 Import String.StringSyntax.
-Require Import List FunctionalExtensionality.
+Require Import List FunctionalExtensionality Arith.
 Require Import StateMachines.Inhabit.
 Import ListNotations.
 Set Universe Polymorphism.
-Unset Universe Minimization ToSet.
 Open Scope type_scope.
 Open Scope string_scope.
 Set Implicit Arguments.
@@ -442,12 +441,13 @@ Ltac st_op_to_ev :=
     cbv beta
   end.
 
+(*
 Definition option_branch A B (f : A -> B) f0 o :=
   match o with
   | None => f0
   | Some a => f a
   end.
-
+*)
 (*
 Theorem ex_correct : forall N,
     ex N = proj1_sig (ex_derive_parent N) tt.
@@ -461,6 +461,7 @@ Proof.
   auto.
 Qed.
  *)
+(*
 
 Lemma derive_parent_rect : forall state A N (a0:A) f f0 st0 stS op0 opS step,
     (forall a, equiv' step (st0 a) (nat_rect_nondep (f a) (f0 a) 0 a) (op0 a)) ->
@@ -477,8 +478,25 @@ Proof.
   revert a0.
   induction N; intros; simpl; auto.
   apply H.
+Qed.*)
+
+Lemma derive_parent_rect : forall state A N (a0:A) f f0 st0 stS op0 opS step,
+    (forall a, equiv' step (st0 a) (f a a) (op0 a)) ->
+    (forall N0,
+        (forall a, equiv' step (match N0 with O => st0 a | S N0' => stS a N0' end) (nat_rect_nondep (f a) (f0 a) N0 a) (match N0 with O => op0 a | S N0' => opS a N0' end)) ->
+        (forall a, equiv' step (stS a N0)
+                          (f0 a N0
+                              (nat_rect_nondep
+                                    (f a) (f0 a)
+                                    N0) a) (opS a N0))) ->
+    @equiv' _ args_effect rets_effect state step (match N with O => st0 a0 | S N0 => stS a0 N0 end) (nat_rect_nondep (f a0) (f0 a0) N a0) (match N with O => op0 a0 | S N0 => opS a0 N0 end).
+Proof.
+  intros.
+  revert a0.
+  induction N; intros; simpl; auto.
 Qed.
 
+(*
 Lemma derive_opt : forall eff args rets A state (x : option A) sta st fa f opa op step,
     (forall a, equiv' step (sta a) (fa a) (opa a)) ->
     equiv' step st f op ->
@@ -489,6 +507,19 @@ Lemma derive_opt : forall eff args rets A state (x : option A) sta st fa f opa o
 Proof.
   intros.
   unfold option_branch.
+  destruct x; auto.
+Qed.
+ *)
+
+Lemma derive_opt : forall eff args rets A state (x : option A) sta st fa f opa op step,
+    (forall a, equiv' step (sta a) (fa a) (opa a)) ->
+    equiv' step st f op ->
+    @equiv' eff args rets state step
+           (match x with Some a => sta a | None => st end)
+           (match x with Some a => fa a | None => f end)
+           (match x with Some a => opa a | None => op end).
+Proof.
+  intros.
   destruct x; auto.
 Qed.
 
@@ -587,6 +618,20 @@ Ltac dest_step' :=
                                 end) ef);
             replace rhs with tmp by (unfold tmp; auto);
             subst tmp
+        | putString =>
+          set (tmp := (fun e => match e as e0 return rets_effect e0 -> T with
+                                | putString => rhs
+                                | _ => fun _ => None
+                                end) ef);
+          replace rhs with tmp by (unfold tmp; auto);
+          subst tmp
+        | getString =>
+          set (tmp := (fun e => match e as e0 return rets_effect e0 -> T with
+                                | getString => rhs
+                                | _ => fun _ => None
+                                end) ef);
+          replace rhs with tmp by (unfold tmp; auto);
+          subst tmp
         | yield =>
           set (tmp := (fun _ => rhs) yield);
           replace rhs with tmp by (unfold tmp; auto);
@@ -612,10 +657,10 @@ Ltac derive_core ptr env :=
       [ let H := fresh in
         intro H;
         derive_core (fun x => ptr (inr x)) (env,H)
-       | intros; simpl; dest_step']
+       | intros; cbv beta; dest_step']
     | Done _ _ =>
       eapply (Equiv'Done _ (ptr (inl fv)));
-      simpl; dest_step
+      cbv beta; dest_step
     | seqE' _ _ _ =>
       eapply (derive_seqE' _ (fun s v => _) (fun s v => _) (fun s v => _));
       [ let s := fresh in
@@ -624,30 +669,27 @@ Ltac derive_core ptr env :=
         derive_core ptr (env,s,v)
       | let ptr := next_ptr in
         derive_core ptr env ]
-    | (match ?x with _ => _ end) =>
-      lazymatch type of x with
-      | _ + _ =>
-        eapply (derive_sum _ _ _ (fun a => _) (fun b => _) (fun a => _) (fun b => _));
-        [ let a := fresh in
-          intro a;
-          simpl;
-          let ptr := next_ptr in
-          derive_core ptr (env,a)
-        | let b := fresh in
-          intro b;
-          simpl;
-          let ptr := next_ptr in
-          derive_core ptr (env,b)
-        ]
-      end
-    | (option_branch ?f ?f0 ?x) =>
+    | (match ?x with inl _ => _ end) =>
+      eapply (derive_sum _ _ _ (fun a => _) (fun b => _) (fun a => _) (fun b => _));
+      [ let a := fresh in
+        intro a;
+        cbv beta;
+        let ptr := next_ptr in
+        derive_core ptr (env,a)
+      | let b := fresh in
+        intro b;
+        cbv beta;
+        let ptr := next_ptr in
+        derive_core ptr (env,b)
+      ]
+    | (match ?x with Some _ => _ | None => _ end) =>
       eapply (derive_opt _ (fun a => _) (fun a => _) (fun a => _));
       [ let a := fresh in
         intro a;
-        simpl;
+        cbv beta;
         let ptr := next_ptr in
         derive_core ptr (env,a)
-      | simpl;
+      | cbv beta;
         let ptr := next_ptr in
         derive_core ptr env
       ]
@@ -660,64 +702,21 @@ Ltac derive_core ptr env :=
         (eapply (derive_parent_rect _ _ (fun a b => _) (fun a => _) (fun a => _));
            [ let a := fresh in
              intro a;
-             simpl;
+             cbv beta;
              let ptr := next_ptr in
              derive_core ptr (env,a)
            | let n := fresh in
              let H := fresh in
              let a := fresh in
              intros n H a;
-             simpl;
+             cbv beta;
              let ptr := next_ptr in
              derive_core ptr (env,n,a)
           ])
       end
     end
   end.
-(*
-Ltac derive_rec env :=
-  let N := fresh in
-  eexists;
-  eexists;
-  intro N;
-  eexists ?[init];
-  lazymatch goal with
-    |- equiv _ _ ?prog =>
-    let H := fresh in
-    eassert (equiv_parent (Vector.nil Set)
-                          (fun p : Fin.t 0 =>
-                             Fin.case0
-                               (fun k : Fin.t 0 =>
-                                  step_type (fun _ : yield_effect => nat) (fun _ : yield_effect => nat)
-                                            (Vector.nth (Vector.nil Set) k)) p)
-                          (fun
-                              _ : Vector.t
-                                    (nat ->
-                                     t (fun _ : yield_effect => nat) (fun _ : yield_effect => nat)) 0
-                            => prog) _) as H by (repeat (solve_child || derive_parent));
-    let tmp := fresh in
-    eset (tmp := fun _: Vector.t _ 0 => prog);
-      replace prog with (tmp (Vector.nil _)) by (unfold tmp; auto);
-      subst tmp;
-      erewrite equiv_parent_eq by (apply H)
-  end;
-  simpl;
-  match goal with
-    |- equiv _ _ (_ ?s) =>
-    let u := open_constr:(inl (N,s)) in
-    unify ?init u;
-    generalize s
-  end;
-  intros;
-  repeat eexists;
-  [ dest_sum; simpl; unify_fun
-  | derive_core open_constr:(fun x => inr x) tt;
-    let ptr := next_ptr in
-    eapply (Equiv'Done _ (ptr tt));
-    simpl;
-    apply eq_refl || (pattern_rhs tt; apply eq_refl)
-  ].
-*)
+
 Ltac derive_child' env :=
   lazymatch goal with
     |- equiv _ _ ?x =>
@@ -827,6 +826,9 @@ Instance option_inhabitant A : Inhabit (option A) :=
 Instance t_inhabitant e a r : Inhabit (@t e a r) :=
   { inhabitant := Done _ _ }.
 
+Instance Set_inhabitant : Inhabit Set :=
+  { inhabitant := unit }.
+
 Definition seq_abs A B state (step : step_type (fun _:yield_effect => A)(fun _:yield_effect => B) state) (x:B) C (_:C) (g : A -> C -> t args_effect rets_effect) := t_inhabitant.
 
 
@@ -839,6 +841,21 @@ Ltac get_init c :=
   let init := open_constr:(_) in
   let _ := constr:(ltac:(auto with equivc) : equiv_coro' _ init c) in
   init.
+
+Ltac opt_match_fun expr :=
+  lazymatch expr with
+  | (match ?o with Some a => _ | None => _ end) =>
+    lazymatch (eval pattern o in expr) with
+    | ?F _ =>
+      eval cbv beta iota in (fun a => F (Some a))
+    end
+  end.
+
+Definition option_branch A B (f:A -> B) f0 o :=
+  match o with
+  | Some a => f a
+  | None => f0
+  end.
 
 Ltac to_dummy i p :=
   lazymatch p with
@@ -875,13 +892,18 @@ Ltac to_dummy i p :=
     | _ =>
       constr:((@seq_abs A B state step z (coro_type step) c, f))
     end
-  | @option_branch ?A ?B ?f ?f0 ?o =>
-    let x := (eval cbv beta in (f (dummy _ _ i))) in
-    let d := to_dummy (S i) x in
-    let d0 := to_dummy i f0 in
-    lazymatch (eval pattern (dummy _ A i) in d) with
-    | ?g _ =>
-      constr:((@option_branch A B, g : A -> _, d0, o))
+  | (match ?o with Some _ => _ | None => ?f0 end) =>
+    let f := opt_match_fun p in
+    lazymatch type of o with
+    | option ?A =>
+      let B := type of p in
+      let x := (eval cbv beta in (f (dummy _ _ i))) in
+      let d := to_dummy (S i) x in
+      let d0 := to_dummy i f0 in
+      lazymatch (eval pattern (dummy _ A i) in d) with
+      | ?g _ =>
+        constr:((@option_branch A B, g, d0, o))
+      end
     end
   | @nat_rect_nondep ?A ?f ?f0 ?n ?a =>
     let x := (eval cbv beta in (f0 (dummy _ _ i) (dummy _ _ (S i)) (dummy _ _ (S (S i))))) in
@@ -1194,12 +1216,13 @@ Qed.
 Hint Resolve GenForall2_size nth_err_None nth_err_Some GenForall2_cons GenForall2_nth_None_Some GenForall2_nth_Some_None : foldable.
 Transparent proc_coro.
 
-
+(*
 Definition loop_ex (n i : nat)(g : forall A, A -> t args_effect rets_effect) :=
   pipe (ex_coroutine 0 : coro_type (projT1 (projT2 ex_coroutine_derive')))
        (fun c0 =>
           nat_rect_nondep
-            (fun l => option_branch
+            (fun l =>
+               option_branch
                         (fun c => g _ c)
                         (Done _ _)
                         (nth_err _ l i))
@@ -1208,7 +1231,7 @@ Definition loop_ex (n i : nat)(g : forall A, A -> t args_effect rets_effect) :=
                     (fun cm =>
                        rec (cm::l)))
             n [c0]).
-
+*)
 Ltac get_step c :=
   let step := open_constr:(_) in
   let _ := constr:(ltac:(auto with equivc') : equiv_coro' step _ c) in
@@ -1246,7 +1269,11 @@ Lemma ex_coroutine_derive'' :
   exact None.
 Defined.
 
-Definition ex_coroutine_equiv2 k : equiv_coro' _ _ (ex_coroutine k) :=
+Definition ex_coroutine_step :=
+  projT1 (projT2 ex_coroutine_derive'').
+
+Definition ex_coroutine_equiv2 k :
+  equiv_coro' ex_coroutine_step _ (ex_coroutine k) :=
   proj2_sig (projT2 (projT2 ex_coroutine_derive'') k).
 
 Definition ex_coroutine_equiv2' k
@@ -1270,16 +1297,34 @@ Hint Resolve GenForall2_nth_Some_equiv_coro : foldable.
 
 Ltac generalize_and_ind :=
   lazymatch goal with
-    |- nat_rect_nondep ?A _ ?k ?l = nat_rect_nondep _ _ _ ?l' =>
+    |- nat_rect_nondep _ _ ?k ?l = nat_rect_nondep _ _ _ ?l' =>
     lazymatch type of l with
     | context [@coro_type _ _ ?state ?step] =>
         cut (GenForall2 (fun (coro : coro_type step) (st : state) => equiv_coro' step st coro) l l');
       [ generalize l l'
        |unfold GenForall2; eexists; split; [reflexivity|simpl; eauto with equivc]];
-      induction k; intros; unfold nat_rect_nondep
+      induction k; intros;
+      lazymatch goal with
+        |- nat_rect_nondep ?f ?f0 _ _ = nat_rect_nondep ?f' ?f0' _ _ =>
+        let tmp := fresh in
+        set (tmp := f);
+        let tmp' := fresh in
+        set (tmp' := f');
+        let tmp0 := fresh in
+        set (tmp0 := f0);
+        let tmp0' := fresh in
+        set (tmp0' := f0');
+        simpl nat_rect_nondep;
+        subst tmp; subst tmp'; subst tmp0; subst tmp0';
+        cbv beta
+      end
     end
   end.
 
+Ltac dest_yield :=
+  repeat match goal with
+         | e : yield_effect |- _ => destruct e
+         end.
 
 Ltac proc_step :=
   lazymatch goal with
@@ -1295,7 +1340,8 @@ Ltac proc_step :=
     let op := fresh "op" in
     let H1 := fresh in
     let H2 := fresh in
-    inversion H0 as [s e a p next op H1 H2|]; subst;
+    inversion H0 as [s e a p next op H1 H2|];
+    subst;
     unfold step_state at 1, seqE' at 1;
     rewrite H2;
     lazymatch goal with
@@ -1308,12 +1354,13 @@ Ltac proc_step :=
         H_ : _ = c x |- _ =>
         rewrite <- H_
       end
-    end
+    end;
+    dest_yield
   end.
 
 Ltac dest_opt :=
   lazymatch goal with
-    |- option_branch _ _ ?o = option_branch _ _ ?o0 =>
+    |- match ?o with _ => _ end = option_branch _ _ ?o0 =>
     destruct o eqn:?, o0 eqn:?;
              unfold option_branch
   end.
@@ -1323,16 +1370,34 @@ Notation "'let_coro' x := c 'in' p" :=
         (fun x => p))
     (at level 200, only parsing).
 
-Definition loop_ex' (n i : nat) :=
+Ltac mid_eq_core :=
+  generalize_and_ind
+  || dest_opt
+  || proc_step
+  || (repeat match goal with
+             | H : _ |- _ => apply H
+             end;
+      now eauto with foldable equivc)
+  || (exfalso; now eauto with foldable)
+  || reflexivity
+  || lazymatch goal with
+       |- Eff _ _ _ = Eff _ _ _ =>
+       f_equal;
+       let H := fresh in
+       extensionality H
+     end.
+
+Definition loop_ex (n i : nat) :=
   let_coro c0 := ex_coroutine 0 in
       nat_rect_nondep
-        (fun l => option_branch
-                    (fun c : @coro_type nat nat _ _=>
-                       r <- resume c $ 1;
-                         putN r;
-                         Done _ _)
-                    (Done _ _)
-                    (nth_err _ l i))
+        (fun l =>
+           match nth_err _ l i : option (@coro_type nat nat _ _) with
+           | Some c =>
+             r <- resume c $ 1;
+               putN r;
+               Done _ _
+           | None => Done _ _
+           end)
         (fun m rec l =>
            putN (0:args_effect putNat);
              pipe (ex_coroutine m : @coro_type nat nat _ _)
@@ -1340,43 +1405,47 @@ Definition loop_ex' (n i : nat) :=
                      rec (cm::l)))
         n [c0].
 
-Lemma loop_ex'_eq k n :
-  loop_ex' k n =
-  ltac:(let x := (eval red in (loop_ex' k n)) in
+Ltac derive env :=
+  lazymatch goal with
+    |- equiv _ ?init ?x =>
+    let u := open_constr:(inl env) in
+    unify init u;
+    let H := fresh in
+    assert (x = ltac:(let x' := eval red in x in
+                          let x'' := coro_to_state x' in exact x''))
+      as H
+        by (change x with ltac:(let x0 := eval red in x in exact x0);
+            unfold pipe;
+            repeat mid_eq_core);
+    rewrite H;
+    clear H;
+    unfold step_state;
+    repeat eexists;
+    [ dest_step
+    | unfold option_branch;
+      unshelve derive_core open_constr:(fun a => inr a) env;
+      exact unit || intros; exact None ]
+  end.
+
+(*
+Lemma loop_ex_eq k n :
+  loop_ex k n =
+  ltac:(let x := (eval red in (loop_ex k n)) in
         let x' := coro_to_state x in exact x').
 Proof.
-  unfold loop_ex'.
+  unfold loop_ex.
   unfold pipe.
-  generalize_and_ind.
-  - dest_opt.
-    repeat (reflexivity || proc_step).
-    exfalso. eauto with foldable.
-    exfalso. eauto with foldable.
-    reflexivity.
-  - f_equal.
-    extensionality tt_.
-    apply IHk.
-    apply GenForall2_cons; simpl in *; eauto with equivc.
-Qed.
+  repeat mid_eq_core.
+Qed.*)
 
-Definition loop_ex'_derive n i :
-  { state & { step & { init | @equiv _ _ _ state step init (loop_ex' n i) }}}.
+Definition loop_ex_derive n i :
+  { state & { step & { init | @equiv _ _ _ state step init (loop_ex n i) }}}.
 Proof.
   do 3 eexists.
-  lazymatch goal with
-    |- _ _ ?init _ =>
-    let u := open_constr:(inl (tt,n,i)) in
-    unify init u
-  end.
-  rewrite loop_ex'_eq.
-  unfold step_state.
-  repeat eexists.
-  dest_step.
-  unshelve derive_core open_constr:(fun x => inr x) (tt,n,i);
-    exact unit || intros; exact None.
+  derive (tt,n,i).
 Defined.
 
-Compute (fun n i => projT1 (projT2 (loop_ex'_derive n i))).
+Eval cbv [projT1 projT2 loop_ex_derive prod_curry sum_merge] in (fun n i => projT1 (projT2 (loop_ex_derive n i))).
 
 Inductive tree A := Node : A -> tree A -> tree A -> tree A | Leaf.
 Instance tree_Inhabit A : Inhabit (tree A) :=
@@ -1420,7 +1489,7 @@ Fixpoint foldr_map A B (f : A -> B -> B)(init : B)(t : tree (nat * A)) :=
   | Node (k,a) l r => foldr_map f (f a (foldr_map f init r)) l
   | Leaf _ => init
   end.
-Require Import Arith.
+
 Fixpoint zip_map A1 A2 (m1 : tree (nat * A1))(m2 : tree (nat * A2)) :=
   match m1, m2 with
   | Node (k1,a1) l1 r1, Node (k2,a2) l2 r2 =>
@@ -1807,63 +1876,39 @@ Definition coro_map_loop fuel :=
           (fun _ => Done _ _)
           (fun _ rec m' =>
              key <- getN;
-               option_branch
-                 (fun c : @coro_type nat nat _ _ =>
-                    n <- getN;
-                      r <- resume c $ n;
-                      putN r;
-                      rec (replace_map key c m'))
-                 (rec m')
-                 (bsearch key m'))
+               match bsearch key m' : option (@coro_type nat nat _ _) with
+               | Some c =>
+                 n <- getN;
+                   r <- resume c $ n;
+                   putN r;
+                   rec (replace_map key c m')
+               | None => rec m'
+               end)
           fuel (Node (0,c) (Leaf _) (Leaf _)).
 
 Hint Constructors ex equiv'.
 Hint Unfold equiv_coro'.
 
+(*
 Lemma coro_map_loop_eq : forall fuel,
     coro_map_loop fuel =
     ltac:(let x := (eval red in (coro_map_loop fuel)) in
           let x' := coro_to_state x in exact x').
 Proof.
   intros.
-  unfold coro_map_loop.
-  unfold pipe.
-  generalize_and_ind.
-  reflexivity.
-  f_equal.
-  extensionality key.
-  dest_opt.
-  f_equal.
-  extensionality r.
-  proc_step.
-  f_equal.
-  extensionality r0.
-  apply IHfuel.
-  destruct e.
-  eauto with foldable.
-  reflexivity.
-  exfalso. eauto with foldable.
-  exfalso. eauto with foldable.
-  apply IHfuel.
-  auto.
+  unfold coro_map_loop, pipe.
+  repeat mid_eq_core.
 Qed.
+ *)
 
 Lemma coro_map_loop_derive : forall fuel,
     { state & { step & { init | @equiv _ _ _  state step init (coro_map_loop fuel) }}}.
 Proof.
   intros.
-  repeat eexists.
-  match goal with
-    |- _ ?init = _ =>
-    let u := open_constr:(inl (tt,fuel)) in
-    unify init u
-  end.
-  dest_step.
-  rewrite coro_map_loop_eq.
-  unfold step_state.
-  unshelve derive_core open_constr:(fun x => inr x) (tt,fuel);
-    exact unit || intros; exact None.
+  do 3 eexists.
+  derive (tt,fuel).
 Defined.
+
 
 Definition echo name s : t (const_yield String.string) (const_yield String.string) :=
   s' <- yield (String.append (String.append s " from ") name);
@@ -1879,7 +1924,9 @@ Proof.
   exact inhabitant.
 Defined.
 
-Definition echo_equiv n : equiv_coro' _ _ (echo n) :=
+Definition echo_step := projT1 (projT2 echo_derive).
+
+Definition echo_equiv n : equiv_coro' echo_step _ (echo n) :=
   proj2_sig (projT2 (projT2 echo_derive) n).
 
 Definition echo_equiv' n
@@ -1896,15 +1943,16 @@ Definition sendHello fuel :=
     (fun _ => Done _ _)
     (fun _ rec m =>
        key <- getN;
-         option_branch
-           (fun c : @coro_type String.string String.string _ _ =>
-              r <- resume c $ "hello";
-                putStr r;
-                rec (replace_map key c m))
-           (rec m)
-           (bsearch key m))
+         match bsearch key m : option (@coro_type String.string String.string _ _) with
+         | Some c =>
+           r <- resume c $ "hello";
+             putStr r;
+             rec (replace_map key c m)
+         | None => rec m
+         end)
     fuel (Node (0,c0) (Node (1,c1) (Leaf _) (Leaf _)) (Leaf _)).
 
+(*
 Lemma sendHello_eq : forall fuel,
     sendHello fuel =
     ltac:(let x := (eval red in (sendHello fuel)) in
@@ -1912,19 +1960,13 @@ Lemma sendHello_eq : forall fuel,
 Proof.
   intros.
   unfold sendHello, pipe.
-  generalize_and_ind.
-  reflexivity.
-  f_equal.
-  extensionality key.
-  dest_opt.
-  proc_step.
-  f_equal.
-  extensionality tt_.
-  apply IHfuel.
-  destruct e.
-  eauto with foldable.
-  eauto with foldable.
-  exfalso. eauto with foldable.
-  exfalso. eauto with foldable.
-  eauto with foldable.
+  repeat mid_eq_core.
 Qed.
+ *)
+
+Lemma sendHello_derive fuel :
+  {state & {step & {init | @equiv _ _ _ state step init (sendHello fuel)}}}.
+Proof.
+  do 3 eexists.
+  derive (tt,fuel).
+Defined.
