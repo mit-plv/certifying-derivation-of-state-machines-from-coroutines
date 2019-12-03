@@ -9,27 +9,27 @@ Open Scope string_scope.
 Set Implicit Arguments.
 
 Section Effect.
-  Context (eff : Set)(args rets: eff -> Set).
+  Context (eff : Set)(args rets: eff -> Set)(ret_type : Set).
 
   Inductive t :=
   | Eff : forall (e : eff), args e -> (rets e -> t) -> t
-  | Done.
+  | Return : ret_type -> t.
 
   Definition step_type (state : Set) := state -> forall (e : eff),
-      rets e -> option (state * option { e : eff & args e }).
+      rets e -> (state * option { e : eff & args e }) + ret_type.
 
   Inductive equiv' (state : Set)(step : step_type state) :
     state -> t -> option { e : eff & args e } -> Prop :=
   | Equiv'Eff : forall s e (a : args e) p next op,
       (forall r, equiv' step (next r) (p r) (op r)) ->
-      (forall r, step s e r = Some (next r, op r)) ->
+      (forall r, step s e r = inl (next r, op r)) ->
       equiv' step s (Eff a p) (Some (existT _ _ a))
-  | Equiv'Done : forall s,
-      step s = (fun _ _ => None) ->
-      equiv' step s Done None.
+  | Equiv'Return : forall s o,
+      step s = (fun _ _ => inr o) ->
+      equiv' step s (Return o) None.
 
   Definition equiv state (step : step_type state) init p :=
-    exists op s, step init = (fun _ _ => Some (s, op)) /\ equiv' step s p op.
+    exists op s, step init = (fun _ _ => inl (s, op)) /\ equiv' step s p op.
 
 End Effect.
 
@@ -53,29 +53,35 @@ Definition rets_effect (e : effect) :=
 
 Inductive yield_effect := yield : yield_effect.
 
-Definition equiv_coro A B state (step : step_type (fun _:yield_effect => A)(fun _:yield_effect => B) state) init p :=
-  exists op s, forall r,
-      step init yield r = Some (s r, op r) /\ equiv' step (s r) (p r) (op r).
-
-Definition seqE A B (e : t (fun _:yield_effect => A) (fun _:yield_effect => B)) : (A -> (B -> t (fun _:yield_effect => A) (fun _:yield_effect => B)) -> t args_effect rets_effect) -> t args_effect rets_effect :=
-  match e with
-  | Done _ _ => fun _ => Done _ _
-  | Eff _ a p => fun cont => cont a p
-  end.
-
 Notation "'const_yield' A" :=
   (fun _:yield_effect => A)
     (at level 10).
 
-Definition coro_type A B state (_ : step_type (const_yield A) (const_yield B) state):= B -> t (const_yield A)(const_yield B).
+Definition equiv_coro A B state
+           (step : step_type (const_yield A)(const_yield B) unit state) init p :=
+  exists op s, forall r,
+      step init yield r = inl (s r, op r) /\ equiv' step (s r) (p r) (op r).
 
-Definition proc_coro A B state (step : step_type (const_yield A)(const_yield B) state)(c : coro_type step) (x : B) : (A -> coro_type step -> t args_effect rets_effect) -> t args_effect rets_effect :=
+Definition seqE (A B C:Set) (e : t (const_yield A) (const_yield B) unit)
+  : (A -> (B -> t (const_yield A) (const_yield B) unit) ->
+     t args_effect rets_effect (option C)) ->
+    t args_effect rets_effect (option C) :=
+  match e with
+  | Return _ _ c => fun _ => Return _ _ None
+  | Eff _ a p => fun cont => cont a p
+  end.
+
+Definition coro_type A B state
+           (_ : step_type (const_yield A) (const_yield B) unit state):=
+  B -> t (const_yield A)(const_yield B) unit.
+
+Definition proc_coro (A B C state : Set)
+           (step : step_type (const_yield A)(const_yield B) unit state)
+           (c : coro_type step) (x : B)
+  : (A -> coro_type step -> t args_effect rets_effect (option C)) ->
+    t args_effect rets_effect (option C) :=
   seqE (c x).
 
-Definition Let_coroutine (A B:Set)
-           (c : B -> t (fun _:yield_effect => A)(fun _:yield_effect => B)) p
-  : t args_effect rets_effect :=
-  p c.
 Notation "n <- 'getN' ; e" :=
   (Eff getNat (tt : args_effect getNat) (fun n : rets_effect getNat => e))
     (at level 100, right associativity).
@@ -95,14 +101,17 @@ Notation "v1 <- 'yield' v2 ; e" :=
   (Eff yield v2 (fun v1 => e))
     (at level 100, right associativity).
 
-Definition get_put : t args_effect rets_effect :=
+Definition get_put : t args_effect rets_effect unit :=
   n <- getN;
   putN (S n);
-    Done _ _.
+    Return _ _ tt.
 
-Definition seqE' A state (x : option (state * option { e : yield_effect & A })) (f : state -> A -> t args_effect rets_effect)(f0 : t args_effect rets_effect) :=
+Definition seqE' A C state
+           (x : (state * option { e : yield_effect & A }) + unit)
+           (f : state -> A -> t args_effect rets_effect C)
+           (f0 : t args_effect rets_effect C) :=
   match x with
-  | Some (s, Some (existT _ _ v)) => f s v
+  | inl (s, Some (existT _ _ v)) => f s v
   | _ => f0
   end.
 
@@ -129,32 +138,12 @@ Ltac curry_lhs :=
     aux x
   end.
 
-Definition prod_curry_rev (A B C : Set)(f : A -> B -> C)(x : B * A) :=
-  let (b,a) := x in
-  f a b.
-
-Ltac curry_lhs' :=
-  lazymatch goal with
-    |- ?x = _ =>
-    let rec aux p :=
-        lazymatch p with
-        | ?f (_,_) =>
-          let f' := open_constr:(prod_curry_rev (fun _ => _)) in
-          unify f f'; unfold prod_curry_rev
-        | ?p' _ =>
-          aux p'
-        end
-    in
-    aux x
-  end.
-
 Ltac pattern_rhs term :=
-  match goal with
+  lazymatch goal with
     |- _ = ?X =>
-    let x := fresh in
-    set (x := X); pattern term in x; subst x
+    let X' := (eval pattern term in X) in
+    change X with X'
   end.
-
 
 Lemma equal_f : forall (A B : Set)(f g : A -> B) x,
     f = g -> f x = g x.
@@ -172,8 +161,7 @@ Ltac unify_fun :=
         | tt =>
           lazymatch goal with
           | |- _ = ?X =>
-            let tmp := fresh in
-            set (tmp := X); pattern tt at 0 in tmp; subst tmp
+            change X with ((fun _:unit => X) tt)
           end
          | _ =>
            tryif is_var x then
@@ -207,41 +195,6 @@ Ltac dest_sum :=
     unify g e
   end.
 
-Ltac dest_step :=
-  simpl;
-  repeat (dest_sum; simpl);
-  lazymatch goal with
-    |- _ ?r = _ =>
-    pattern_rhs r; apply equal_f
-  end;
-  repeat curry_lhs';
-  lazymatch goal with
-    |- ?f ?b ?arg = ?X =>
-    lazymatch arg with
-    | getNat =>
-      let u := open_constr:(fun x e =>
-                            match e as e0 return rets_effect e0 -> _ with
-                            | getNat => X
-                            | _ => fun _ => None
-                            end)
-      in
-      unify f u
-    | putNat =>
-      let u := open_constr:(fun x e =>
-                            match e as e0 return rets_effect e0 -> _ with
-                            | putNat => X
-                            | _ => fun _ => None
-                            end)
-      in
-      unify f u
-    | yield =>
-      pattern_rhs yield; apply equal_f;
-      pattern_rhs b; apply equal_f
-    end
-  | _ => idtac
-  end;
-  simpl; apply eq_refl.
-
 Ltac free_var body vars :=
   lazymatch vars with
   | (?rest,?a) =>
@@ -254,100 +207,6 @@ Ltac free_var body vars :=
   | ?a => tt
   end.
 
-Ltac derive_yield ptr env :=
-  lazymatch goal with
-    |- equiv' ?step ?st ?prog ?op =>
-    lazymatch prog with
-    | Eff _ ?a ?p =>
-      lazymatch st with
-      | ?f ?r =>
-        let fv := free_var prog env in
-        let u := open_constr:(fun r => _) in
-        unify f u;
-        lazymatch op with
-        | ?g _ =>
-          let u := open_constr:(fun r => _) in
-          unify g u
-        end;
-        simpl;
-        lazymatch goal with
-          |- equiv' _ ?st' _ _ =>
-          let u := open_constr:(ptr (inl fv)) in
-          unify st' u
-        end;
-        eapply Equiv'Eff;
-        [ let fr := fresh in
-          intro fr;
-          derive_yield (fun x => ptr (inr x)) (env,fr)
-        | intros; simpl; dest_step
-        ]
-      | _ =>
-        let fv := free_var prog env in
-        let u := open_constr:(ptr (inl fv)) in
-        unify st u;
-        eapply Equiv'Eff;
-        [ let fr := fresh in
-          intro fr;
-          derive_yield (fun x => ptr (inr x)) (env,fr)
-        | intros; simpl; dest_step
-        ]
-      end
-    | Done _ _ =>
-      lazymatch st with
-      | ?f ?r =>
-        let fv := free_var prog (env,r) in
-        let u := open_constr:(fun r => _) in
-        unify f u;
-        lazymatch op with
-        | ?g _ =>
-          let u := open_constr:(fun r => _) in
-          unify g u
-        end;
-        simpl;
-        lazymatch goal with
-          |- equiv' _ ?st' _ _ =>
-          let u := open_constr:(ptr fv) in
-          unify st' u
-        end;
-        eapply Equiv'Done;
-        simpl;
-        repeat (dest_sum; simpl);
-        lazymatch goal with
-          |- ?f _ = _ =>
-          let u := open_constr:(fun _ => _) in
-          unify f u;
-          simpl;
-          apply eq_refl
-        end
-      end
-    end
-  end.
-
-Ltac derive_child env :=
-  match goal with
-    |- _ _ ?init _ =>
-    let u := open_constr:(inl env) in
-    unify init u
-  end;
-  do 2 eexists;
-  split;
-  [ dest_step
-  | derive_yield open_constr:(fun x => inr x) env].
-
-Definition get_put_derive :
-  {state & {step & {init | @equiv _ _ _ state step init get_put}}}.
-Proof.
-  unfold get_put.
-  do 3 eexists.
-  derive_child tt.
-Defined.
-
-Definition get_put2 : t args_effect rets_effect :=
-  n <- getN;
-    m <- getN;
-  putN (S n);
-  Done _ _.
-
 Definition nat_rect_nondep A f (f0 : nat -> A -> A) :=
   fix F (n : nat) : A :=
     match n with
@@ -355,66 +214,10 @@ Definition nat_rect_nondep A f (f0 : nat -> A -> A) :=
     | S n' => f0 n' (F n')
     end.
 
-
-Definition nat_rect_sig A (P : nat -> A -> Prop) (f0 : A) :
-    P 0 f0 ->
-    (forall n hn, { hSn | P n hn -> P (S n) hSn }) ->
-    forall n, { h | P n h }.
-Proof.
-  intros.
-  refine (exist _ (nat_rect_nondep f0 (fun m rec => proj1_sig (X m rec)) n) _).
-  induction n.
-  auto.
-  simpl.
-  destruct (X n (nat_rect_nondep f0
-             (fun (m : nat) (rec : A) => proj1_sig (X m rec)) n)).
-  simpl.
-  auto.
-Defined.
-
-
-Definition ex_coroutine k n : t (fun _:yield_effect => nat) (fun _:yield_effect => nat):=
+Definition ex_coroutine k n : t (const_yield nat) (const_yield nat) unit :=
   m <- yield (k + n)%nat;
     _ <- yield (n + m)%nat;
-    Done _ _.
-
-(*
-Definition ex N :=
-  let c1 := ex_coroutine 2 in
-  let c2 := ex_coroutine 3 in
-  n1 <- resume c1 $ 1;
-    n2 <- resume c2 $ 2;
-    nat_rect _ (fun _ _ => Done args_effect rets_effect)
-             (fun N' rec c1 c2 =>
-                m1 <- resume c1 $ n1;
-                  putN m1;
-                  m2 <- resume c2 $ n2;
-                  putN m2;
-                  rec c1 c2) N c1 c2.
-*)
-
-Ltac solve_child :=
-  match goal with
-    |- equiv _ _ ?x =>
-    let y := eval red in x in
-        change x with y
-  end;
-  derive_child tt.
-
-Lemma ex_coroutine_derive k n :
-  { state & { step & { init | @equiv  _ _ _ state step init (ex_coroutine k n) }}}.
-Proof.
-  eexists.
-  eexists.
-  eexists.
-  solve_child.
-Defined.
-
-Ltac my_instantiate ev t :=
-  let H := fresh in
-  pose ev as H;
-  instantiate (1 := t) in (Value of H);
-  subst H.
+    Return _ _ tt .
 
 Ltac st_op_to_ev :=
   lazymatch goal with
@@ -441,46 +244,7 @@ Ltac st_op_to_ev :=
     cbv beta
   end.
 
-(*
-Definition option_branch A B (f : A -> B) f0 o :=
-  match o with
-  | None => f0
-  | Some a => f a
-  end.
-*)
-(*
-Theorem ex_correct : forall N,
-    ex N = proj1_sig (ex_derive_parent N) tt.
-Proof.
-  intros.
-  set (x := fun _ => ex N).
-  replace (ex N) with (x (Vector.nil _)); subst x.
-  erewrite equiv_parent_eq.
-  2: apply (proj2_sig (ex_derive_parent N)).
-  reflexivity.
-  auto.
-Qed.
- *)
-(*
-
-Lemma derive_parent_rect : forall state A N (a0:A) f f0 st0 stS op0 opS step,
-    (forall a, equiv' step (st0 a) (nat_rect_nondep (f a) (f0 a) 0 a) (op0 a)) ->
-    (forall N0,
-        (forall a, equiv' step (match N0 with O => st0 a | S N0' => stS a N0' end) (nat_rect_nondep (f a) (f0 a) N0 a) (match N0 with O => op0 a | S N0' => opS a N0' end)) ->
-        (forall a, equiv' step (stS a N0)
-                          (f0 a N0
-                              (nat_rect_nondep
-                                    (f a) (f0 a)
-                                    N0) a) (opS a N0))) ->
-    @equiv' _ args_effect rets_effect state step (match N with O => st0 a0 | S N0 => stS a0 N0 end) (nat_rect_nondep (f a0) (f0 a0) N a0) (match N with O => op0 a0 | S N0 => opS a0 N0 end).
-Proof.
-  intros.
-  revert a0.
-  induction N; intros; simpl; auto.
-  apply H.
-Qed.*)
-
-Lemma derive_parent_rect : forall state A N (a0:A) f f0 st0 stS op0 opS step,
+Lemma derive_parent_rect : forall state A C N (a0:A) f f0 st0 stS op0 opS step,
     (forall a, equiv' step (st0 a) (f a a) (op0 a)) ->
     (forall N0,
         (forall a, equiv' step (match N0 with O => st0 a | S N0' => stS a N0' end) (nat_rect_nondep (f a) (f0 a) N0 a) (match N0 with O => op0 a | S N0' => opS a N0' end)) ->
@@ -489,32 +253,17 @@ Lemma derive_parent_rect : forall state A N (a0:A) f f0 st0 stS op0 opS step,
                               (nat_rect_nondep
                                     (f a) (f0 a)
                                     N0) a) (opS a N0))) ->
-    @equiv' _ args_effect rets_effect state step (match N with O => st0 a0 | S N0 => stS a0 N0 end) (nat_rect_nondep (f a0) (f0 a0) N a0) (match N with O => op0 a0 | S N0 => opS a0 N0 end).
+    @equiv' _ args_effect rets_effect C state step (match N with O => st0 a0 | S N0 => stS a0 N0 end) (nat_rect_nondep (f a0) (f0 a0) N a0) (match N with O => op0 a0 | S N0 => opS a0 N0 end).
 Proof.
   intros.
   revert a0.
   induction N; intros; simpl; auto.
 Qed.
 
-(*
-Lemma derive_opt : forall eff args rets A state (x : option A) sta st fa f opa op step,
+Lemma derive_opt : forall eff args rets A C state (x : option A) sta st fa f opa op step,
     (forall a, equiv' step (sta a) (fa a) (opa a)) ->
     equiv' step st f op ->
-    @equiv' eff args rets state step
-            (option_branch (fun a => sta a) st x)
-            (option_branch (fun a => fa a) f x)
-            (option_branch (fun a => opa a) op x).
-Proof.
-  intros.
-  unfold option_branch.
-  destruct x; auto.
-Qed.
- *)
-
-Lemma derive_opt : forall eff args rets A state (x : option A) sta st fa f opa op step,
-    (forall a, equiv' step (sta a) (fa a) (opa a)) ->
-    equiv' step st f op ->
-    @equiv' eff args rets state step
+    @equiv' eff args rets C state step
            (match x with Some a => sta a | None => st end)
            (match x with Some a => fa a | None => f end)
            (match x with Some a => opa a | None => op end).
@@ -523,13 +272,13 @@ Proof.
   destruct x; auto.
 Qed.
 
-Lemma derive_sum : forall eff args rets A B state (x : A + B) fa fb sta stb opa opb step,
+Lemma derive_sum : forall eff args rets A B C state (x : A + B) fa fb sta stb opa opb step,
     (forall a, equiv' step (sta a) (fa a) (opa a)) ->
     (forall b, equiv' step (stb b) (fb b) (opb b)) ->
-    @equiv' eff args rets state step (match x with
-                              | inl a => sta a
-                              | inr b => stb b
-                              end)
+    @equiv' eff args rets C state step (match x with
+                                        | inl a => sta a
+                                        | inr b => stb b
+                                        end)
             (match x with
              | inl a => fa a
              | inr b => fb b
@@ -543,16 +292,19 @@ Proof.
   destruct x; auto.
 Qed.
 
-Lemma derive_seqE' : forall A state state' (x : option (state' * option { _ : yield_effect & A })) f f0 g g0 h h0 step,
+Lemma derive_seqE' :
+  forall A C state state'
+         (x : (state' * option { _ : yield_effect & A }) + unit)
+         f f0 g g0 h h0 step,
     (forall s v, equiv' step (g s v) (f s v) (h s v)) ->
     equiv' step g0 f0 h0 ->
-    @equiv' _ _ _ state step
+    @equiv' _ _ _ C state step
             (match x with
-             | Some (s, Some (existT _ _ v)) => g s v
+             | inl (s, Some (existT _ _ v)) => g s v
              | _ => g0
              end) (seqE' x f f0)
             (match x with
-             | Some (s, Some (existT _ _ v)) => h s v
+             | inl (s, Some (existT _ _ v)) => h s v
              | _ => h0
              end).
 Proof.
@@ -569,8 +321,9 @@ Proof.
   auto.
 Qed.
 
-Definition step_state A B state (step : step_type (fun _:yield_effect => A)(fun _:yield_effect => B) state) st x g :=
-  seqE' (step st yield x) (fun s v => g v s) (Done _ _).
+Definition step_state (A B C state : Set)
+           (step : step_type (const_yield A)(const_yield B) unit state) st x g :=
+  seqE' (step st yield x) (fun s v => g v s) (Return _ _ (@None C)).
 
 Lemma equal_f_dep : forall A (T : A -> Set) B (f g : forall a, T a -> B) a0,
     f = g -> f a0 = g a0.
@@ -582,7 +335,7 @@ Qed.
 
 Ltac next_ptr :=
   lazymatch goal with
-    |- @equiv' _ _ _ ?st _ _ _ _ =>
+    |- @equiv' _ _ _ _ ?st _ _ _ _ =>
     let rec aux state :=
         lazymatch state with
         | ?A + (?B + ?T) =>
@@ -597,7 +350,7 @@ Ltac next_ptr :=
 
 Ltac dest_step' :=
   lazymatch goal with
-    |- @eq ?T (?g _ ?ef ?r) _ =>
+    |- @eq (?T1 + ?T2) (?g _ ?ef ?r) _ =>
     pattern_rhs r;
       apply equal_f;
       lazymatch goal with
@@ -605,33 +358,29 @@ Ltac dest_step' :=
         let tmp := fresh in
         lazymatch ef with
         | putNat =>
-          set (tmp := (fun e => match e as e0 return rets_effect e0 -> T with
-                                | putNat => rhs
-                                | _ => fun _ => None
-                                end) ef);
-            replace rhs with tmp by (unfold tmp; auto);
-            subst tmp
+          change rhs with
+          ((fun e => match e as e0 return rets_effect e0 -> T1+T2 with
+                     | putNat => rhs
+                     | _ => fun _ => inr None
+                     end) ef)
         | getNat =>
-          set (tmp := (fun e => match e as e0 return rets_effect e0 -> T with
-                                | getNat => rhs
-                                | _ => fun _ => None
-                                end) ef);
-            replace rhs with tmp by (unfold tmp; auto);
-            subst tmp
+          change rhs with
+          ((fun e => match e as e0 return rets_effect e0 -> T1+T2 with
+                     | getNat => rhs
+                     | _ => fun _ => inr None
+                     end) ef)
         | putString =>
-          set (tmp := (fun e => match e as e0 return rets_effect e0 -> T with
+          change rhs with
+          ((fun e => match e as e0 return rets_effect e0 -> T1+T2 with
                                 | putString => rhs
-                                | _ => fun _ => None
-                                end) ef);
-          replace rhs with tmp by (unfold tmp; auto);
-          subst tmp
+                                | _ => fun _ => inr None
+                                end) ef)
         | getString =>
-          set (tmp := (fun e => match e as e0 return rets_effect e0 -> T with
+          change rhs with
+          ((fun e => match e as e0 return rets_effect e0 -> T1+T2 with
                                 | getString => rhs
-                                | _ => fun _ => None
-                                end) ef);
-          replace rhs with tmp by (unfold tmp; auto);
-          subst tmp
+                                | _ => fun _ => inr None
+                                end) ef)
         | yield =>
           set (tmp := (fun _ => rhs) yield);
           replace rhs with tmp by (unfold tmp; auto);
@@ -642,6 +391,7 @@ Ltac dest_step' :=
       simpl;
       repeat (dest_sum; simpl);
       unify_fun
+  | |- _ ?r = _ => repeat (dest_sum; simpl); unify_fun
   end.
 
 Definition label := fun _:nat => True.
@@ -652,15 +402,15 @@ Ltac derive_core ptr env :=
     |- equiv' _ _ ?prog _ =>
     let fv := free_var prog env in
     lazymatch prog with
-    | @Eff _ ?args ?rets ?e _ _ =>
+    | @Eff _ ?args ?rets ?C ?e _ _ =>
       eapply (Equiv'Eff (ptr (inl fv)) e);
       [ let H := fresh in
         intro H;
         derive_core (fun x => ptr (inr x)) (env,H)
        | intros; cbv beta; dest_step']
-    | Done _ _ =>
-      eapply (Equiv'Done _ (ptr (inl fv)));
-      cbv beta; dest_step
+    | Return _ _ _ =>
+      eapply (Equiv'Return _ (ptr (inl fv)));
+      intros; cbv beta; dest_step'
     | seqE' _ _ _ =>
       eapply (derive_seqE' _ (fun s v => _) (fun s v => _) (fun s v => _));
       [ let s := fresh in
@@ -717,7 +467,8 @@ Ltac derive_core ptr env :=
     end
   end.
 
-Ltac derive_child' env :=
+(*
+Ltac derive_child env :=
   lazymatch goal with
     |- equiv _ _ ?x =>
     let y := eval red in x in
@@ -738,8 +489,9 @@ Ltac derive_child' env :=
   | derive_core open_constr:(fun x => inr x) env
   ].
 
-Lemma ex_coroutine_derive' :
-  { state & { step & forall k, { init | @equiv_coro _ _ state step init (ex_coroutine k) }}}.
+Lemma ex_coroutine_derive :
+  { state & { step & forall k,
+                { init | @equiv_coro _ _ state step init (ex_coroutine k) }}}.
   do 3 eexists.
   lazymatch goal with
     |- equiv _ _ ?x =>
@@ -787,6 +539,7 @@ Definition ex_coroutine_equiv' k
   ex_coroutine_equiv k.
 
 Hint Resolve ex_coroutine_equiv ex_coroutine_equiv' : equivc.
+*)
 
 Definition replace A i l (a:A) :=
   (fix aux i l pre :=
@@ -801,18 +554,17 @@ Definition replace A i l (a:A) :=
 
 Definition pipe A B (a : A)(f : A -> B) := f a.
 
+Instance unit_inhabitant : Inhabit unit := {inhabitant := tt }.
 
 Instance coro_type_inhabitant A B state step :
   Inhabit (@coro_type A B state step) :=
-  { inhabitant := fun _ => Done _ _ }.
+  { inhabitant := fun _ => Return _ _ inhabitant }.
 
 Instance prod_inhabitant A B `{IA : Inhabit A} `{IB : Inhabit B} : Inhabit (A * B) :=
   { inhabitant := (inhabitant, inhabitant) }.
 
 Instance string_inhabitant : Inhabit String.string :=
   { inhabitant := "" }.
-
-Instance unit_inhabitant : Inhabit unit := {inhabitant := tt }.
 
 Instance sum_inhabitant A B `{IA : Inhabit A} : Inhabit (A + B) :=
   { inhabitant := inl inhabitant }.
@@ -823,18 +575,25 @@ Instance arrow_inhabitant A B `{IB : Inhabit B} : Inhabit (A -> B) :=
 Instance option_inhabitant A : Inhabit (option A) :=
   { inhabitant := None }.
 
-Instance t_inhabitant e a r : Inhabit (@t e a r) :=
-  { inhabitant := Done _ _ }.
+Instance t_inhabitant e a r (c:Set) `{IC : Inhabit c} : Inhabit (@t e a r c) :=
+  { inhabitant := Return _ _ inhabitant }.
 
 Instance Set_inhabitant : Inhabit Set :=
   { inhabitant := unit }.
 
-Definition seq_abs A B state (step : step_type (fun _:yield_effect => A)(fun _:yield_effect => B) state) (x:B) C (_:C) (g : A -> C -> t args_effect rets_effect) := t_inhabitant.
+Instance Type_inhabitant : Inhabit Type :=
+  { inhabitant := unit }.
+
+Definition seq_abs A B R state
+           (step : step_type (const_yield A)(const_yield B) R state) (x:B) C (_:C) (g : A -> C -> t args_effect rets_effect R ) := t_inhabitant.
 
 
 Opaque dummy.
 
-Definition equiv_coro' (A B:Set) `{IA : Inhabit A} `{IB : Inhabit B} state (step : step_type _ _ state) st (coro : B -> t (const_yield A) (const_yield B)) :=
+Definition equiv_coro' (A B C :Set) `{IA : Inhabit A} `{IB : Inhabit B} state
+           (step : step_type _ _ _ state)
+           st
+           (coro : B -> t (const_yield A) (const_yield B) C) :=
   exists op, equiv' step st (r <- yield inhabitant; coro r) op.
 
 Ltac get_init c :=
@@ -870,14 +629,14 @@ Ltac to_dummy i p :=
         constr:((pipe, init, g))
       end
     end
-  | @Eff _ args_effect rets_effect ?e ?a ?f =>
+  | @Eff _ args_effect rets_effect ?C ?e ?a ?f =>
     let x := (eval cbv beta in (f (dummy _ _ i))) in
     let d := to_dummy (S i) x in
     lazymatch (eval pattern (dummy _ (rets_effect e) i) in d) with
     | ?g _ =>
-      constr:((@Eff _ args_effect rets_effect e a, g))
+      constr:((@Eff _ args_effect rets_effect C e a, g))
     end
-  | @proc_coro ?A ?B ?state ?step ?c ?z ?f =>
+  | @proc_coro ?A ?B ?C ?state ?step ?c ?z ?f =>
     let x := (eval cbv beta in (f (dummy _ _ i) (dummy _ _ (S i)))) in
     lazymatch f with
     | context [proc_coro] =>
@@ -886,11 +645,11 @@ Ltac to_dummy i p :=
       | _ -> ?T -> _ =>
         lazymatch (eval pattern (dummy _ A i), (dummy _ T (S i)) in d) with
         | ?g _ _ =>
-          constr:((@seq_abs A B state step z (coro_type step) c, g))
+          constr:((@seq_abs A B C state step z (coro_type step) c, g))
         end
       end
     | _ =>
-      constr:((@seq_abs A B state step z (coro_type step) c, f))
+      constr:((@seq_abs A B C state step z (coro_type step) c, f))
     end
   | (match ?o with Some _ => _ | None => ?f0 end) =>
     let f := opt_match_fun p in
@@ -936,12 +695,12 @@ Ltac reconstruct tree i :=
         constr:(Eff e a p'')
       end
     end
-  | (@seq_abs ?A ?B _ ?step ?z ?state ?st, ?p) =>
+  | (@seq_abs ?A ?B ?C _ ?step ?z ?state ?st, ?p) =>
     let x := (eval cbv beta in (p (dummy _ _ i) (dummy _ _ (S i)))) in
     let p' := reconstruct x (S (S i)) in
     lazymatch (eval pattern (dummy _ A i), (dummy _ state (S i)) in p') with
     | ?p'' _ _ =>
-      constr:(@step_state A B _ step st z p'')
+      constr:(@step_state A B C _ step st z p'')
     end
   | (@option_branch ?A ?B, ?f, ?f0, ?o) =>
     let x := (eval cbv beta in (f (dummy _ _ i))) in
@@ -1248,8 +1007,8 @@ Ltac derive_coro env :=
   | _ => idtac
   end;
   simpl;
-  match goal with
-    |- _ _ ?init _ =>
+  lazymatch goal with
+    |- _ ?init _ =>
     let u := open_constr:(inl env) in
     unify init u
   end;
@@ -1259,32 +1018,32 @@ Ltac derive_coro env :=
   | intros; dest_step'
   ].
 
-Lemma ex_coroutine_derive'' :
-  { state & { step & forall k, { init | @equiv_coro' _ _ _ _ state step init (ex_coroutine k) }}}.
+Lemma ex_coroutine_derive :
+  { state & { step & forall k, { init | @equiv_coro' _ _ _ _ _ state step init (ex_coroutine k) }}}.
   do 3 eexists.
-  derive_coro (tt,k).
-  Grab Existential Variables.
-  2: exact unit.
-  intros.
-  exact None.
+  unshelve derive_coro (tt,k); exact inhabitant.
 Defined.
 
 Definition ex_coroutine_step :=
-  projT1 (projT2 ex_coroutine_derive'').
+  projT1 (projT2 ex_coroutine_derive).
 
-Definition ex_coroutine_equiv2 k :
+Definition ex_coroutine_equiv k :
   equiv_coro' ex_coroutine_step _ (ex_coroutine k) :=
-  proj2_sig (projT2 (projT2 ex_coroutine_derive'') k).
+  proj2_sig (projT2 (projT2 ex_coroutine_derive) k).
 
-Definition ex_coroutine_equiv2' k
-  : equiv_coro' ltac:(let x := eval simpl in (projT1 (projT2 ex_coroutine_derive'')) in exact x) ltac:(let x := eval simpl in (proj1_sig (projT2 (projT2 ex_coroutine_derive'') k)) in exact x) (ex_coroutine k) :=
-  ex_coroutine_equiv2 k.
+Definition ex_coroutine_equiv' k
+  : equiv_coro' ltac:(let x := eval simpl in (projT1 (projT2 ex_coroutine_derive)) in exact x) ltac:(let x := eval simpl in (proj1_sig (projT2 (projT2 ex_coroutine_derive) k)) in exact x) (ex_coroutine k) :=
+  ex_coroutine_equiv k.
 
-Hint Resolve ex_coroutine_equiv2 ex_coroutine_equiv2' : equivc.
-Hint Resolve ex_coroutine_equiv2 : equivc'.
+Hint Resolve ex_coroutine_equiv ex_coroutine_equiv' : equivc.
+Hint Resolve ex_coroutine_equiv : equivc'.
 
-Lemma GenForall2_nth_Some_equiv_coro : forall (A B:Set) (IA : Inhabit A) (IB : Inhabit B) state (step : step_type (const_yield A) (const_yield B) state) F (F_Foldable : Foldable F) x1 x2 n a1 a2,
-    GenForall2 (fun (coro : coro_type step) (st : state) => equiv_coro' step st coro) x1 x2 ->
+Lemma GenForall2_nth_Some_equiv_coro :
+  forall (A B:Set) (IA : Inhabit A) (IB : Inhabit B) state
+         (step : step_type (const_yield A) (const_yield B) unit state)
+         F (F_Foldable : Foldable F) x1 x2 n a1 a2,
+    GenForall2 (fun (coro : coro_type step) (st : state) =>
+                  equiv_coro' step st coro) x1 x2 ->
     nth_err _ x1 n = Some a1 ->
     nth_err _ x2 n = Some a2 ->
     equiv_coro' step a2 a1.
@@ -1395,8 +1154,8 @@ Definition loop_ex (n i : nat) :=
            | Some c =>
              r <- resume c $ 1;
                putN r;
-               Done _ _
-           | None => Done _ _
+               Return _ _ (Some tt)
+           | None => Return _ _ None
            end)
         (fun m rec l =>
            putN (0:args_effect putNat);
@@ -1421,10 +1180,10 @@ Ltac derive env :=
     clear H;
     unfold step_state;
     repeat eexists;
-    [ dest_step
+    [ dest_step'
     | unfold option_branch;
       unshelve derive_core open_constr:(fun a => inr a) env;
-      exact unit || intros; exact None ]
+      intros; exact inhabitant ]
   end.
 
 (*
@@ -1439,7 +1198,7 @@ Proof.
 Qed.*)
 
 Definition loop_ex_derive n i :
-  { state & { step & { init | @equiv _ _ _ state step init (loop_ex n i) }}}.
+  { state & { step & { init | @equiv _ _ _ _ state step init (loop_ex n i) }}}.
 Proof.
   do 3 eexists.
   derive (tt,n,i).
@@ -1834,7 +1593,10 @@ Proof.
   congruence.
 Qed.
 
-Lemma GenForall2_bsearch_Some_equiv_coro : forall (A B : Set) (IA : Inhabit A) (IB : Inhabit B) (state : Set) (step : step_type (const_yield A) (const_yield B) state) x1 x2 n a1 a2,
+Lemma GenForall2_bsearch_Some_equiv_coro :
+  forall (A B : Set) (IA : Inhabit A) (IB : Inhabit B) (state : Set)
+         (step : step_type (const_yield A) (const_yield B) unit state)
+         x1 x2 n a1 a2,
     GenForall2 (fun (coro : coro_type step) (st : state) => equiv_coro' step st coro) x1 x2 ->
     bsearch n x1 = Some a1 ->
     bsearch n x2 = Some a2 ->
@@ -1873,7 +1635,7 @@ Hint Resolve GenForall2_bsearch_Some_None GenForall2_bsearch_None_Some GenForall
 Definition coro_map_loop fuel :=
   let_coro c := ex_coroutine 0 in
         nat_rect_nondep
-          (fun _ => Done _ _)
+          (fun _ => Return _ _ (Some tt))
           (fun _ rec m' =>
              key <- getN;
                match bsearch key m' : option (@coro_type nat nat _ _) with
@@ -1902,7 +1664,7 @@ Qed.
  *)
 
 Lemma coro_map_loop_derive : forall fuel,
-    { state & { step & { init | @equiv _ _ _  state step init (coro_map_loop fuel) }}}.
+    { state & { step & { init | @equiv _ _ _  _ state step init (coro_map_loop fuel) }}}.
 Proof.
   intros.
   do 3 eexists.
@@ -1910,18 +1672,17 @@ Proof.
 Defined.
 
 
-Definition echo name s : t (const_yield String.string) (const_yield String.string) :=
+Definition echo name s :
+  t (const_yield String.string) (const_yield String.string) unit :=
   s' <- yield (String.append (String.append s " from ") name);
     _ <- yield (String.append (String.append s' " from ") name);
-    Done _ _.
+    Return _ _ tt.
 
 Lemma echo_derive :
-  { state & { step & forall name, { init | @equiv_coro' _ _ _ _ state step init (echo name) }}}.
+  { state & { step & forall name, { init | @equiv_coro' _ _ _ _ _ state step init (echo name) }}}.
 Proof.
   do 3 eexists.
-  unshelve derive_coro (tt,name).
-  exact unit.
-  exact inhabitant.
+  unshelve derive_coro (tt,name); exact inhabitant.
 Defined.
 
 Definition echo_step := projT1 (projT2 echo_derive).
@@ -1940,7 +1701,7 @@ Definition sendHello fuel :=
   let_coro c0 := echo "c0" in
   let_coro c1 := echo "c1" in
   nat_rect_nondep
-    (fun _ => Done _ _)
+    (fun _ => Return _ _ (Some tt))
     (fun _ rec m =>
        key <- getN;
          match bsearch key m : option (@coro_type String.string String.string _ _) with
@@ -1965,7 +1726,7 @@ Qed.
  *)
 
 Lemma sendHello_derive fuel :
-  {state & {step & {init | @equiv _ _ _ state step init (sendHello fuel)}}}.
+  {state & {step & {init | @equiv _ _ _ _ state step init (sendHello fuel)}}}.
 Proof.
   do 3 eexists.
   derive (tt,fuel).
