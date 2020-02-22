@@ -2,20 +2,21 @@
 
 module Helper where
 
-import Network.TLS.Internal
 import Network.TLS
-import Data.Maybe
-import Data.List
+import Network.TLS.Internal
 import qualified Data.ByteString as B
+import Data.List
+import Data.Maybe
 
+extensionLookup :: ExtensionID -> [ExtensionRaw] -> Maybe B.ByteString
+extensionLookup toFind = fmap (\(ExtensionRaw _ content) -> content)
+                       . find (\(ExtensionRaw eid _) -> eid == toFind)
+{-
 extensionID_NegotiatedGroups :: ExtensionID
 extensionID_NegotiatedGroups                    = 0xa -- RFC4492bis and TLS 1.3
 extensionID_KeyShare :: ExtensionID
 extensionID_KeyShare                            = 0x33 -- TLS 1.3
 
-extensionLookup :: ExtensionID -> [ExtensionRaw] -> Maybe B.ByteString
-extensionLookup toFind = fmap (\(ExtensionRaw _ content) -> content)
-                       . find (\(ExtensionRaw eid _) -> eid == toFind)
 
 decodeNegotiatedGroups :: B.ByteString -> Maybe [Group]
 decodeNegotiatedGroups =
@@ -44,20 +45,9 @@ getKeyShare = do
     case toEnumSafe16 g of
       Nothing  -> return (len, Nothing)
       Just grp -> return (len, Just (Build_KeyShare grp key))
-
+-}
 supportedGroups' = [P256,P384,P521,X25519]
 
-serverGroups :: Context -> ([]) Group
-serverGroups ctx =
+serverGroups :: ([]) Group
+serverGroups =
   supportedGroups'
-
-extension_KeyShare :: (([]) ExtensionRaw) -> Maybe (([]) KeyShare)
-extension_KeyShare exts =
-  extensionLookup extensionID_KeyShare exts >>= decodeKeyShare
-
-extension_NegotiatedGroups :: (([]) ExtensionRaw) -> ([]) Group
-extension_NegotiatedGroups exts =
-  case extensionLookup extensionID_NegotiatedGroups exts >>= decodeNegotiatedGroups of
-    Just gs -> gs
-    _ -> []
-

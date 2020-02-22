@@ -37,16 +37,6 @@ prod_curry f p =
   case p of {
    (,) x y -> f x y}
 
-list_rect :: a2 -> (a1 -> (([]) a1) -> a2 -> a2) -> (([]) a1) -> a2
-list_rect f f0 l =
-  case l of {
-   [] -> f;
-   (:) y l0 -> f0 y l0 (list_rect f f0 l0)}
-
-list_rec :: a2 -> (a1 -> (([]) a1) -> a2 -> a2) -> (([]) a1) -> a2
-list_rec =
-  list_rect
-
 data SigT a p =
    ExistT a p
 
@@ -55,23 +45,6 @@ hd_error l =
   case l of {
    [] -> GHC.Base.Nothing;
    (:) x _ -> GHC.Base.Just x}
-
-in_dec :: (a1 -> a1 -> GHC.Base.Bool) -> a1 -> (([]) a1) -> GHC.Base.Bool
-in_dec h a l =
-  list_rec GHC.Base.False (\a0 _ iHl ->
-    let {s = h a0 a} in
-    case s of {
-     GHC.Base.True -> GHC.Base.True;
-     GHC.Base.False -> iHl}) l
-
-filter :: (a1 -> GHC.Base.Bool) -> (([]) a1) -> ([]) a1
-filter f l =
-  case l of {
-   [] -> [];
-   (:) x l0 ->
-    case f x of {
-     GHC.Base.True -> (:) x (filter f l0);
-     GHC.Base.False -> filter f l0}}
 
 find :: (a1 -> GHC.Base.Bool) -> (([]) a1) -> GHC.Base.Maybe a1
 find f l =
@@ -88,36 +61,45 @@ sum_merge f g x =
    Prelude.Left a -> f a;
    Prelude.Right b -> g b}
 
-type String = B.ByteString
+type ByteString = B.ByteString
 
 group_beq :: T.Group -> T.Group -> GHC.Base.Bool
 group_beq = (GHC.Base.==)
 
-group_eq_dec :: T.Group -> T.Group -> GHC.Base.Bool
-group_eq_dec = (GHC.Base.==)
-
-kSgroup :: Helper.KeyShare -> T.Group
+kSgroup :: I.KeyShareEntry -> T.Group
 kSgroup k =
   case k of {
-   Helper.Build_KeyShare kSgroup0 _ -> kSgroup0}
+   I.KeyShareEntry kSgroup0 _ -> kSgroup0}
 
 type ExtensionRaw = I.ExtensionRaw
 
-type ClientHelloMsg =
-  ([]) ExtensionRaw
-  -- singleton inductive, whose constructor was Build_ClientHelloMsg
-  
-cHextension :: ClientHelloMsg -> ([]) ExtensionRaw
-cHextension c =
-  c
+type Session = I.Session
 
-type Context = T.Context
+type CipherID = T.CipherID
 
-serverGroups :: Context -> ([]) T.Group
+data ClientHelloMsg =
+   Build_ClientHelloMsg Session (([]) ExtensionRaw) (([]) CipherID)
+
+chSession :: ClientHelloMsg -> Session
+chSession c =
+  case c of {
+   Build_ClientHelloMsg chSession0 _ _ -> chSession0}
+
+chExtension :: ClientHelloMsg -> ([]) ExtensionRaw
+chExtension c =
+  case c of {
+   Build_ClientHelloMsg _ chExtension0 _ -> chExtension0}
+
+chCiphers :: ClientHelloMsg -> ([]) CipherID
+chCiphers c =
+  case c of {
+   Build_ClientHelloMsg _ _ chCiphers0 -> chCiphers0}
+
+serverGroups :: ([]) T.Group
 serverGroups = Helper.serverGroups
 
-findKeyShare :: (([]) Helper.KeyShare) -> (([]) T.Group) -> GHC.Base.Maybe
-                Helper.KeyShare
+findKeyShare :: (([]) I.KeyShareEntry) -> (([]) T.Group) -> GHC.Base.Maybe
+                I.KeyShareEntry
 findKeyShare ks gs =
   case gs of {
    [] -> GHC.Base.Nothing;
@@ -126,22 +108,17 @@ findKeyShare ks gs =
      GHC.Base.Just k -> GHC.Base.Just k;
      GHC.Base.Nothing -> findKeyShare ks gs'}}
 
-intersect :: (([]) T.Group) -> (([]) T.Group) -> ([]) T.Group
-intersect xs ys =
-  filter (\x ->
-    case in_dec group_eq_dec x ys of {
-     GHC.Base.True -> GHC.Base.True;
-     GHC.Base.False -> GHC.Base.False}) xs
+extension_KeyShare :: (([]) ExtensionRaw) -> GHC.Base.Maybe (([]) I.KeyShareEntry)
+extension_KeyShare = (\exts -> case Helper.extensionLookup I.extensionID_KeyShare exts GHC.Base.>>= I.extensionDecode I.MsgTClientHello of { GHC.Base.Just (I.KeyShareClientHello kses) -> GHC.Base.return kses})
 
-extension_KeyShare :: (([]) ExtensionRaw) -> GHC.Base.Maybe (([]) Helper.KeyShare)
-extension_KeyShare = Helper.extension_KeyShare
+type Handshake13 = I.Handshake13
 
-extension_NegotiatedGroups :: (([]) ExtensionRaw) -> ([]) T.Group
-extension_NegotiatedGroups = Helper.extension_NegotiatedGroups
+type Packet13 = I.Packet13
 
 data Eff_tls =
    RecvClientHello
- | GenerateRND
+ | GetRandomBytes
+ | SendPacket
 
 type Args_tls = Any
 
@@ -154,69 +131,131 @@ lift_tls e a e0 =
    RecvClientHello ->
     case e0 of {
      RecvClientHello -> a;
-     GenerateRND -> (\_ -> Prelude.Right GHC.Base.Nothing)};
-   GenerateRND ->
+     _ -> (\_ -> Prelude.Right GHC.Base.Nothing)};
+   GetRandomBytes ->
     case e0 of {
-     RecvClientHello -> (\_ -> Prelude.Right GHC.Base.Nothing);
-     GenerateRND -> a}}
+     GetRandomBytes -> a;
+     _ -> (\_ -> Prelude.Right GHC.Base.Nothing)};
+   SendPacket ->
+    case e0 of {
+     SendPacket -> a;
+     _ -> (\_ -> Prelude.Right GHC.Base.Nothing)}}
 
-pickKeyShare_step :: (Prelude.Either ((,) () Context)
-                     (Prelude.Either ((,) () Context)
-                     (Prelude.Either ((,) () Context)
-                     (GHC.Base.Maybe ((,) ClientHelloMsg Helper.KeyShare))))) ->
-                     Eff_tls -> Rets_tls -> Prelude.Either
-                     ((,)
-                     (Prelude.Either ((,) () Context)
-                     (Prelude.Either ((,) () Context)
-                     (Prelude.Either ((,) () Context)
-                     (GHC.Base.Maybe ((,) ClientHelloMsg Helper.KeyShare)))))
-                     (GHC.Base.Maybe (SigT Eff_tls Args_tls)))
-                     (GHC.Base.Maybe ((,) ClientHelloMsg Helper.KeyShare))
-pickKeyShare_step ctx =
-  sum_merge
-    (prod_curry (\_ c _ _ -> Prelude.Left ((,) (Prelude.Right (Prelude.Left ((,) ()
-      c))) (GHC.Base.Just (ExistT RecvClientHello (unsafeCoerce c))))))
-    (sum_merge
-      (prod_curry (\_ c ->
-        lift_tls RecvClientHello (\r -> Prelude.Left ((,)
-          (case extension_KeyShare (cHextension (unsafeCoerce r)) of {
-            GHC.Base.Just a ->
-             case findKeyShare a (serverGroups c) of {
-              GHC.Base.Just a0 -> Prelude.Right (Prelude.Right (Prelude.Right
-               (GHC.Base.Just ((,) (unsafeCoerce r) a0))));
-              GHC.Base.Nothing ->
-               case hd_error
-                      (intersect (serverGroups c)
-                        (extension_NegotiatedGroups (cHextension (unsafeCoerce r)))) of {
-                GHC.Base.Just _ -> Prelude.Right (Prelude.Right (Prelude.Left ((,)
-                 () c)));
-                GHC.Base.Nothing -> Prelude.Right (Prelude.Right (Prelude.Right
-                 GHC.Base.Nothing))}};
+type Version = T.Version
+
+extensionEncode_KeyShare :: I.KeyShareEntry -> ByteString
+extensionEncode_KeyShare = (\ks -> I.extensionEncode (I.KeyShareServerHello ks))
+
+extensionEncode_SupportedVersions :: Version -> ByteString
+extensionEncode_SupportedVersions = (\v -> I.extensionEncode (I.SupportedVersionsServerHello v))
+
+tLS13 :: Version
+tLS13 = T.TLS13
+
+extensionRaw_KeyShare :: ByteString -> ExtensionRaw
+extensionRaw_KeyShare = I.ExtensionRaw I.extensionID_KeyShare
+
+extensionRaw_SupportedVersions :: ByteString -> ExtensionRaw
+extensionRaw_SupportedVersions = I.ExtensionRaw I.extensionID_SupportedVersions
+
+handshake13 :: (([]) Handshake13) -> Packet13
+handshake13 = I.Handshake13
+
+serverHello13 :: ByteString -> Session -> CipherID -> (([]) ExtensionRaw) ->
+                 Handshake13
+serverHello13 = (\b -> I.ServerHello13 (I.ServerRandom {I.unServerRandom = b}))
+
+doHandshake_step :: (Prelude.Either ()
+                    (Prelude.Either ()
+                    (Prelude.Either ((,) ((,) () ClientHelloMsg) I.KeyShareEntry)
+                    (Prelude.Either
+                    ((,) ((,) ((,) () ClientHelloMsg) I.KeyShareEntry) CipherID)
+                    (Prelude.Either
+                    ((,)
+                    ((,) ((,) ((,) () ClientHelloMsg) I.KeyShareEntry) CipherID)
+                    ByteString) (GHC.Base.Maybe ())))))) -> Eff_tls -> Rets_tls ->
+                    Prelude.Either
+                    ((,)
+                    (Prelude.Either ()
+                    (Prelude.Either ()
+                    (Prelude.Either ((,) ((,) () ClientHelloMsg) I.KeyShareEntry)
+                    (Prelude.Either
+                    ((,) ((,) ((,) () ClientHelloMsg) I.KeyShareEntry) CipherID)
+                    (Prelude.Either
+                    ((,)
+                    ((,) ((,) ((,) () ClientHelloMsg) I.KeyShareEntry) CipherID)
+                    ByteString) (GHC.Base.Maybe ()))))))
+                    (GHC.Base.Maybe (SigT Eff_tls Args_tls))) (GHC.Base.Maybe ())
+doHandshake_step =
+  sum_merge (\_ _ _ -> Prelude.Left ((,) (Prelude.Right (Prelude.Left ()))
+    (GHC.Base.Just (ExistT RecvClientHello (unsafeCoerce ())))))
+    (sum_merge (\_ ->
+      lift_tls RecvClientHello (\r -> Prelude.Left ((,)
+        (case extension_KeyShare (chExtension (unsafeCoerce r)) of {
+          GHC.Base.Just a ->
+           case findKeyShare a serverGroups of {
+            GHC.Base.Just a0 -> Prelude.Right (Prelude.Right (Prelude.Left ((,) ((,)
+             () (unsafeCoerce r)) a0)));
             GHC.Base.Nothing -> Prelude.Right (Prelude.Right (Prelude.Right
-             GHC.Base.Nothing))})
-          (case extension_KeyShare (cHextension (unsafeCoerce r)) of {
-            GHC.Base.Just a ->
-             case findKeyShare a (serverGroups c) of {
-              GHC.Base.Just _ -> GHC.Base.Nothing;
-              GHC.Base.Nothing ->
-               case hd_error
-                      (intersect (serverGroups c)
-                        (extension_NegotiatedGroups (cHextension (unsafeCoerce r)))) of {
-                GHC.Base.Just _ -> GHC.Base.Just (ExistT RecvClientHello
-                 (unsafeCoerce c));
-                GHC.Base.Nothing -> GHC.Base.Nothing}};
-            GHC.Base.Nothing -> GHC.Base.Nothing})))))
+             (Prelude.Right (Prelude.Right GHC.Base.Nothing))))};
+          GHC.Base.Nothing -> Prelude.Right (Prelude.Right (Prelude.Right
+           (Prelude.Right (Prelude.Right GHC.Base.Nothing))))})
+        (case extension_KeyShare (chExtension (unsafeCoerce r)) of {
+          GHC.Base.Just a ->
+           case findKeyShare a serverGroups of {
+            GHC.Base.Just _ -> GHC.Base.Just (ExistT GetRandomBytes
+             (unsafeCoerce ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
+               ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
+               ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
+               ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
+               ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
+               ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
+               ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
+               ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
+               ((Prelude.+) 1 0))))))))))))))))))))))))))))))))));
+            GHC.Base.Nothing -> GHC.Base.Nothing};
+          GHC.Base.Nothing -> GHC.Base.Nothing}))))
       (sum_merge
-        (prod_curry (\_ c ->
-          lift_tls RecvClientHello (\r -> Prelude.Left ((,)
-            (case extension_KeyShare (cHextension (unsafeCoerce r)) of {
-              GHC.Base.Just a ->
-               case findKeyShare a (serverGroups c) of {
-                GHC.Base.Just a0 -> Prelude.Right (Prelude.Right (Prelude.Right
-                 (GHC.Base.Just ((,) (unsafeCoerce r) a0))));
+        (prod_curry
+          (prod_curry (\_ r k ->
+            lift_tls GetRandomBytes (\_ -> Prelude.Left ((,)
+              (case hd_error (chCiphers r) of {
+                GHC.Base.Just a -> Prelude.Right (Prelude.Right (Prelude.Right
+                 (Prelude.Left ((,) ((,) ((,) () r) k) a))));
                 GHC.Base.Nothing -> Prelude.Right (Prelude.Right (Prelude.Right
-                 GHC.Base.Nothing))};
-              GHC.Base.Nothing -> Prelude.Right (Prelude.Right (Prelude.Right
-               GHC.Base.Nothing))}) GHC.Base.Nothing)))) (\o _ _ -> Prelude.Right
-        o))) ctx
+                 (Prelude.Right (Prelude.Right GHC.Base.Nothing))))})
+              (case hd_error (chCiphers r) of {
+                GHC.Base.Just _ -> GHC.Base.Just (ExistT GetRandomBytes
+                 (unsafeCoerce ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
+                   ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
+                   ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
+                   ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
+                   ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
+                   ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
+                   ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
+                   ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
+                   ((Prelude.+) 1 0))))))))))))))))))))))))))))))))));
+                GHC.Base.Nothing -> GHC.Base.Nothing}))))))
+        (sum_merge
+          (prod_curry
+            (prod_curry
+              (prod_curry (\_ r k c ->
+                lift_tls GetRandomBytes (\r0 -> Prelude.Left ((,) (Prelude.Right
+                  (Prelude.Right (Prelude.Right (Prelude.Right (Prelude.Left ((,)
+                  ((,) ((,) ((,) () r) k) c) (unsafeCoerce r0))))))) (GHC.Base.Just
+                  (ExistT SendPacket
+                  (unsafeCoerce handshake13 ((:)
+                    (serverHello13 (unsafeCoerce r0) (chSession r) c ((:)
+                      (extensionRaw_KeyShare (extensionEncode_KeyShare k)) ((:)
+                      (extensionRaw_SupportedVersions
+                        (extensionEncode_SupportedVersions tLS13)) []))) []))))))))))
+          (sum_merge
+            (prod_curry
+              (prod_curry
+                (prod_curry
+                  (prod_curry (\_ _ _ _ _ ->
+                    lift_tls SendPacket (\_ -> Prelude.Left ((,) (Prelude.Right
+                      (Prelude.Right (Prelude.Right (Prelude.Right (Prelude.Right
+                      (GHC.Base.Just ())))))) GHC.Base.Nothing))))))) (\o _ _ ->
+            Prelude.Right o)))))
 
