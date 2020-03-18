@@ -23,6 +23,7 @@ dependencies:
 - base >= 4.7 && < 5
 - QuickCheck
 - bytestring
+- word8
 - network
 - data-default-class
 - x509
@@ -33,6 +34,7 @@ dependencies:
 - tasty
 - tasty-quickcheck
 - tls >= 1.5.2
+- memory
 
 library:
   source-dirs: src

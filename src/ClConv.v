@@ -550,7 +550,7 @@ Ltac derive_core ptr env :=
         derive_core ptr (env,s,v)
       | let ptr := next_ptr in
         derive_core ptr env ]
-    | (match ?x with inl _ => _ end) =>
+    | (match ?x with inl _ => _ | inr _ => _ end) =>
       eapply (derive_sum _ _ _ (fun a => _) (fun b => _) (fun a => _) (fun b => _));
       [ let a := fresh in
         intro a;
@@ -574,7 +574,7 @@ Ltac derive_core ptr env :=
         let ptr := next_ptr in
         derive_core ptr env
       ]
-    | (if ?b then _ else _) =>
+    | (match ?b with true => _ | false => _ end) =>
       eapply derive_bool;
       [ let ptr := next_ptr in
         derive_core ptr env

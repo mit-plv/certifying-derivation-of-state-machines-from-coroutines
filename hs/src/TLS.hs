@@ -3,11 +3,16 @@
 
 module TLS where
 
-import qualified Prelude
 import qualified Network.TLS as T
 import qualified Network.TLS.Internal as I
 import qualified Data.ByteString as B
+import qualified Data.ByteArray as BA
 import qualified Helper
+import qualified Data.X509 as X
+import qualified Crypto.PubKey.RSA as RSA
+import qualified Data.Char
+import qualified Data.Word8
+import qualified Prelude
 
 #ifdef __GLASGOW_HASKELL__
 import qualified GHC.Base
@@ -32,6 +37,16 @@ type Any = GHC.Base.Any
 type Any = ()
 #endif
 
+fst :: ((,) a1 a2) -> a1
+fst p =
+  case p of {
+   (,) x _ -> x}
+
+snd :: ((,) a1 a2) -> a2
+snd p =
+  case p of {
+   (,) _ y -> y}
+
 prod_curry :: (a1 -> a2 -> a3) -> ((,) a1 a2) -> a3
 prod_curry f p =
   case p of {
@@ -45,6 +60,15 @@ hd_error l =
   case l of {
    [] -> GHC.Base.Nothing;
    (:) x _ -> GHC.Base.Just x}
+
+filter :: (a1 -> GHC.Base.Bool) -> (([]) a1) -> ([]) a1
+filter f l =
+  case l of {
+   [] -> [];
+   (:) x l0 ->
+    case f x of {
+     GHC.Base.True -> (:) x (filter f l0);
+     GHC.Base.False -> filter f l0}}
 
 find :: (a1 -> GHC.Base.Bool) -> (([]) a1) -> GHC.Base.Maybe a1
 find f l =
@@ -66,16 +90,23 @@ type ByteString = B.ByteString
 group_beq :: T.Group -> T.Group -> GHC.Base.Bool
 group_beq = (GHC.Base.==)
 
-kSgroup :: I.KeyShareEntry -> T.Group
-kSgroup k =
+ksGroup :: I.KeyShareEntry -> T.Group
+ksGroup k =
   case k of {
-   I.KeyShareEntry kSgroup0 _ -> kSgroup0}
+   I.KeyShareEntry ksGroup0 _ -> ksGroup0}
+
+ksData :: I.KeyShareEntry -> ByteString
+ksData k =
+  case k of {
+   I.KeyShareEntry _ ksData0 -> ksData0}
 
 type ExtensionRaw = I.ExtensionRaw
 
 type Session = I.Session
 
 type CipherID = T.CipherID
+
+type Version = T.Version
 
 data ClientHelloMsg =
    Build_ClientHelloMsg Session (([]) ExtensionRaw) (([]) CipherID)
@@ -104,7 +135,7 @@ findKeyShare ks gs =
   case gs of {
    [] -> GHC.Base.Nothing;
    (:) g gs' ->
-    case find (\k -> group_beq (kSgroup k) g) ks of {
+    case find (\k -> group_beq (ksGroup k) g) ks of {
      GHC.Base.Just k -> GHC.Base.Just k;
      GHC.Base.Nothing -> findKeyShare ks gs'}}
 
@@ -115,10 +146,26 @@ type Handshake13 = I.Handshake13
 
 type Packet13 = I.Packet13
 
+type PublicKey = RSA.PublicKey
+
+type PrivateKey = RSA.PrivateKey
+
+type GroupPublic = I.GroupPublic
+
+type GroupKey = I.GroupKey
+
+type Hash = T.Hash
+
+type Cipher = T.Cipher
+
 data Eff_tls =
    RecvClientHello
+ | RecvFinished
+ | RecvCCS
  | GetRandomBytes
  | SendPacket
+ | GenKeys
+ | GroupGetPubShared
 
 type Args_tls = Any
 
@@ -132,6 +179,14 @@ lift_tls e a e0 =
     case e0 of {
      RecvClientHello -> a;
      _ -> (\_ -> Prelude.Right GHC.Base.Nothing)};
+   RecvFinished ->
+    case e0 of {
+     RecvFinished -> a;
+     _ -> (\_ -> Prelude.Right GHC.Base.Nothing)};
+   RecvCCS ->
+    case e0 of {
+     RecvCCS -> a;
+     _ -> (\_ -> Prelude.Right GHC.Base.Nothing)};
    GetRandomBytes ->
     case e0 of {
      GetRandomBytes -> a;
@@ -139,9 +194,27 @@ lift_tls e a e0 =
    SendPacket ->
     case e0 of {
      SendPacket -> a;
+     _ -> (\_ -> Prelude.Right GHC.Base.Nothing)};
+   GenKeys ->
+    case e0 of {
+     GenKeys -> a;
+     _ -> (\_ -> Prelude.Right GHC.Base.Nothing)};
+   GroupGetPubShared ->
+    case e0 of {
+     GroupGetPubShared -> a;
      _ -> (\_ -> Prelude.Right GHC.Base.Nothing)}}
 
-type Version = T.Version
+cipherID_beq :: CipherID -> CipherID -> GHC.Base.Bool
+cipherID_beq = (GHC.Base.==)
+
+cipherID :: Cipher -> CipherID
+cipherID = T.cipherID
+
+cipherHash :: Cipher -> Hash
+cipherHash = T.cipherHash
+
+byteString_beq :: ByteString -> ByteString -> GHC.Base.Bool
+byteString_beq = (GHC.Base.==)
 
 extensionEncode_KeyShare :: I.KeyShareEntry -> ByteString
 extensionEncode_KeyShare = (\ks -> I.extensionEncode (I.KeyShareServerHello ks))
@@ -165,97 +238,711 @@ serverHello13 :: ByteString -> Session -> CipherID -> (([]) ExtensionRaw) ->
                  Handshake13
 serverHello13 = (\b -> I.ServerHello13 (I.ServerRandom {I.unServerRandom = b}))
 
+changeCipherSpec :: Packet13
+changeCipherSpec = I.ChangeCipherSpec13
+
+type CertificateChain = X.CertificateChain
+
+defaultCertChain :: PublicKey -> CertificateChain
+defaultCertChain = Helper.defaultCertChain
+
+certificate13 :: ByteString -> CertificateChain -> (([]) (([]) ExtensionRaw)) ->
+                 Handshake13
+certificate13 = I.Certificate13
+
+empty :: ByteString
+empty = B.empty
+
+ciphersuite_default :: ([]) Cipher
+ciphersuite_default = I.ciphersuite_default
+
+hashWith :: Hash -> (([]) ByteString) -> ByteString
+hashWith = Helper.hashWith
+
+makeCertVerify :: PrivateKey -> ByteString -> Handshake13
+makeCertVerify = Helper.makeCertVerify
+
+encryptedExtensions13 :: (([]) ExtensionRaw) -> Handshake13
+encryptedExtensions13 = I.EncryptedExtensions13
+
+type CryptoError = I.CryptoError
+
+encodeGroupPublic :: GroupPublic -> ByteString
+encodeGroupPublic = I.encodeGroupPublic
+
+decodeGroupPublic :: T.Group -> ByteString -> Prelude.Either CryptoError GroupPublic
+decodeGroupPublic = I.decodeGroupPublic
+
+ba_convert :: GroupKey -> ByteString
+ba_convert = BA.convert
+
+hashDigestSize :: Hash -> GHC.Base.Int
+hashDigestSize = I.hashDigestSize
+
+type Word8 = Data.Word8.Word8
+
+b_replicate :: GHC.Base.Int -> Word8 -> ByteString
+b_replicate = B.replicate
+
+w0 :: Word8
+w0 = Data.Word8._nul
+
+hkdfExtract :: Hash -> ByteString -> ByteString -> ByteString
+hkdfExtract = I.hkdfExtract
+
+hkdfExpandLabel :: Hash -> ByteString -> ByteString -> ByteString -> GHC.Base.Int ->
+                   ByteString
+hkdfExpandLabel = I.hkdfExpandLabel
+
+s2b :: Prelude.String -> ByteString
+s2b = (\s -> B.pack (Prelude.map (\c -> Prelude.fromIntegral (Data.Char.ord c)) s))
+
+finished13 :: ByteString -> Handshake13
+finished13 = I.Finished13
+
+hmac :: Hash -> ByteString -> ByteString -> ByteString
+hmac = I.hmac
+
+inb :: (a1 -> a1 -> GHC.Base.Bool) -> a1 -> (([]) a1) -> GHC.Base.Bool
+inb eqbA x l =
+  case l of {
+   [] -> GHC.Base.False;
+   (:) y _ -> eqbA x y}
+
+chooseCipher :: (([]) CipherID) -> (([]) Cipher) -> GHC.Base.Maybe Cipher
+chooseCipher clientCipherIDs serverCiphers =
+  hd_error
+    (filter (\cipher -> inb cipherID_beq (cipherID cipher) clientCipherIDs)
+      serverCiphers)
+
+makeVerifyData :: Hash -> ByteString -> ByteString -> ByteString
+makeVerifyData h key transcript =
+  hmac h
+    (hkdfExpandLabel h key
+      (s2b ((:) 'f' ((:) 'i' ((:) 'n' ((:) 'i' ((:) 's' ((:) 'h' ((:) 'e' ((:) 'd'
+        ([])))))))))) (s2b ([])) (hashDigestSize h)) transcript
+
 doHandshake_step :: (Prelude.Either ()
                     (Prelude.Either ()
-                    (Prelude.Either ((,) ((,) () ClientHelloMsg) I.KeyShareEntry)
-                    (Prelude.Either
-                    ((,) ((,) ((,) () ClientHelloMsg) I.KeyShareEntry) CipherID)
                     (Prelude.Either
                     ((,)
-                    ((,) ((,) ((,) () ClientHelloMsg) I.KeyShareEntry) CipherID)
-                    ByteString) (GHC.Base.Maybe ())))))) -> Eff_tls -> Rets_tls ->
-                    Prelude.Either
+                    ((,) ((,) ((,) () ((,) ClientHelloMsg ByteString)) Cipher)
+                    I.KeyShareEntry) GroupPublic)
+                    (Prelude.Either
+                    ((,)
+                    ((,) ((,) ((,) () ((,) ClientHelloMsg ByteString)) Cipher)
+                    I.KeyShareEntry) ((,) GroupPublic GroupKey))
+                    (Prelude.Either
+                    ((,)
+                    ((,)
+                    ((,) ((,) ((,) () ((,) ClientHelloMsg ByteString)) Cipher)
+                    I.KeyShareEntry) ((,) GroupPublic GroupKey)) ByteString)
+                    (Prelude.Either
+                    ((,)
+                    ((,) ((,) ((,) () ((,) ClientHelloMsg ByteString)) Cipher)
+                    ((,) GroupPublic GroupKey)) ByteString)
+                    (Prelude.Either
+                    ((,)
+                    ((,) ((,) ((,) () ((,) ClientHelloMsg ByteString)) Cipher)
+                    ((,) GroupPublic GroupKey)) ByteString)
+                    (Prelude.Either
+                    ((,)
+                    ((,)
+                    ((,) ((,) ((,) () ((,) ClientHelloMsg ByteString)) Cipher)
+                    ((,) GroupPublic GroupKey)) ByteString) ByteString)
+                    (Prelude.Either
+                    ((,)
+                    ((,)
+                    ((,)
+                    ((,) ((,) ((,) () ((,) ClientHelloMsg ByteString)) Cipher)
+                    ((,) GroupPublic GroupKey)) ByteString) ByteString)
+                    ((,) PublicKey PrivateKey))
+                    (Prelude.Either
+                    ((,)
+                    ((,)
+                    ((,)
+                    ((,)
+                    ((,) ((,) ((,) () ((,) ClientHelloMsg ByteString)) Cipher)
+                    ((,) GroupPublic GroupKey)) ByteString) ByteString)
+                    ((,) PublicKey PrivateKey)) ByteString)
+                    (Prelude.Either
+                    ((,)
+                    ((,)
+                    ((,)
+                    ((,)
+                    ((,)
+                    ((,) ((,) ((,) () ((,) ClientHelloMsg ByteString)) Cipher)
+                    ((,) GroupPublic GroupKey)) ByteString) ByteString)
+                    ((,) PublicKey PrivateKey)) ByteString) ByteString)
+                    (Prelude.Either
+                    ((,)
+                    ((,)
+                    ((,)
+                    ((,)
+                    ((,)
+                    ((,)
+                    ((,) ((,) ((,) () ((,) ClientHelloMsg ByteString)) Cipher)
+                    ((,) GroupPublic GroupKey)) ByteString) ByteString)
+                    ((,) PublicKey PrivateKey)) ByteString) ByteString) ByteString)
+                    (Prelude.Either
+                    ((,)
+                    ((,)
+                    ((,)
+                    ((,)
+                    ((,)
+                    ((,)
+                    ((,) ((,) ((,) () ((,) ClientHelloMsg ByteString)) Cipher)
+                    ((,) GroupPublic GroupKey)) ByteString) ByteString)
+                    ((,) PublicKey PrivateKey)) ByteString) ByteString) ByteString)
+                    (GHC.Base.Maybe
+                    ((,) ((,) ((,) ByteString ByteString) Handshake13) PublicKey)))))))))))))))
+                    -> Eff_tls -> Rets_tls -> Prelude.Either
                     ((,)
                     (Prelude.Either ()
                     (Prelude.Either ()
-                    (Prelude.Either ((,) ((,) () ClientHelloMsg) I.KeyShareEntry)
-                    (Prelude.Either
-                    ((,) ((,) ((,) () ClientHelloMsg) I.KeyShareEntry) CipherID)
                     (Prelude.Either
                     ((,)
-                    ((,) ((,) ((,) () ClientHelloMsg) I.KeyShareEntry) CipherID)
-                    ByteString) (GHC.Base.Maybe ()))))))
-                    (GHC.Base.Maybe (SigT Eff_tls Args_tls))) (GHC.Base.Maybe ())
+                    ((,) ((,) ((,) () ((,) ClientHelloMsg ByteString)) Cipher)
+                    I.KeyShareEntry) GroupPublic)
+                    (Prelude.Either
+                    ((,)
+                    ((,) ((,) ((,) () ((,) ClientHelloMsg ByteString)) Cipher)
+                    I.KeyShareEntry) ((,) GroupPublic GroupKey))
+                    (Prelude.Either
+                    ((,)
+                    ((,)
+                    ((,) ((,) ((,) () ((,) ClientHelloMsg ByteString)) Cipher)
+                    I.KeyShareEntry) ((,) GroupPublic GroupKey)) ByteString)
+                    (Prelude.Either
+                    ((,)
+                    ((,) ((,) ((,) () ((,) ClientHelloMsg ByteString)) Cipher)
+                    ((,) GroupPublic GroupKey)) ByteString)
+                    (Prelude.Either
+                    ((,)
+                    ((,) ((,) ((,) () ((,) ClientHelloMsg ByteString)) Cipher)
+                    ((,) GroupPublic GroupKey)) ByteString)
+                    (Prelude.Either
+                    ((,)
+                    ((,)
+                    ((,) ((,) ((,) () ((,) ClientHelloMsg ByteString)) Cipher)
+                    ((,) GroupPublic GroupKey)) ByteString) ByteString)
+                    (Prelude.Either
+                    ((,)
+                    ((,)
+                    ((,)
+                    ((,) ((,) ((,) () ((,) ClientHelloMsg ByteString)) Cipher)
+                    ((,) GroupPublic GroupKey)) ByteString) ByteString)
+                    ((,) PublicKey PrivateKey))
+                    (Prelude.Either
+                    ((,)
+                    ((,)
+                    ((,)
+                    ((,)
+                    ((,) ((,) ((,) () ((,) ClientHelloMsg ByteString)) Cipher)
+                    ((,) GroupPublic GroupKey)) ByteString) ByteString)
+                    ((,) PublicKey PrivateKey)) ByteString)
+                    (Prelude.Either
+                    ((,)
+                    ((,)
+                    ((,)
+                    ((,)
+                    ((,)
+                    ((,) ((,) ((,) () ((,) ClientHelloMsg ByteString)) Cipher)
+                    ((,) GroupPublic GroupKey)) ByteString) ByteString)
+                    ((,) PublicKey PrivateKey)) ByteString) ByteString)
+                    (Prelude.Either
+                    ((,)
+                    ((,)
+                    ((,)
+                    ((,)
+                    ((,)
+                    ((,)
+                    ((,) ((,) ((,) () ((,) ClientHelloMsg ByteString)) Cipher)
+                    ((,) GroupPublic GroupKey)) ByteString) ByteString)
+                    ((,) PublicKey PrivateKey)) ByteString) ByteString) ByteString)
+                    (Prelude.Either
+                    ((,)
+                    ((,)
+                    ((,)
+                    ((,)
+                    ((,)
+                    ((,)
+                    ((,) ((,) ((,) () ((,) ClientHelloMsg ByteString)) Cipher)
+                    ((,) GroupPublic GroupKey)) ByteString) ByteString)
+                    ((,) PublicKey PrivateKey)) ByteString) ByteString) ByteString)
+                    (GHC.Base.Maybe
+                    ((,) ((,) ((,) ByteString ByteString) Handshake13) PublicKey)))))))))))))))
+                    (GHC.Base.Maybe (SigT Eff_tls Args_tls)))
+                    (GHC.Base.Maybe
+                    ((,) ((,) ((,) ByteString ByteString) Handshake13) PublicKey))
 doHandshake_step =
   sum_merge (\_ _ _ -> Prelude.Left ((,) (Prelude.Right (Prelude.Left ()))
     (GHC.Base.Just (ExistT RecvClientHello (unsafeCoerce ())))))
     (sum_merge (\_ ->
       lift_tls RecvClientHello (\r -> Prelude.Left ((,)
-        (case extension_KeyShare (chExtension (unsafeCoerce r)) of {
+        (case chooseCipher (chCiphers (fst (unsafeCoerce r))) ciphersuite_default of {
           GHC.Base.Just a ->
-           case findKeyShare a serverGroups of {
-            GHC.Base.Just a0 -> Prelude.Right (Prelude.Right (Prelude.Left ((,) ((,)
-             () (unsafeCoerce r)) a0)));
+           case extension_KeyShare (chExtension (fst (unsafeCoerce r))) of {
+            GHC.Base.Just a0 ->
+             case findKeyShare a0 serverGroups of {
+              GHC.Base.Just a1 ->
+               case decodeGroupPublic (ksGroup a1) (ksData a1) of {
+                Prelude.Left _ -> Prelude.Right (Prelude.Right (Prelude.Right
+                 (Prelude.Right (Prelude.Right (Prelude.Right (Prelude.Right
+                 (Prelude.Right (Prelude.Right (Prelude.Right (Prelude.Right
+                 (Prelude.Right (Prelude.Right GHC.Base.Nothing))))))))))));
+                Prelude.Right b -> Prelude.Right (Prelude.Right (Prelude.Left ((,)
+                 ((,) ((,) ((,) () (unsafeCoerce r)) a) a1) b)))};
+              GHC.Base.Nothing -> Prelude.Right (Prelude.Right (Prelude.Right
+               (Prelude.Right (Prelude.Right (Prelude.Right (Prelude.Right
+               (Prelude.Right (Prelude.Right (Prelude.Right (Prelude.Right
+               (Prelude.Right (Prelude.Right GHC.Base.Nothing))))))))))))};
             GHC.Base.Nothing -> Prelude.Right (Prelude.Right (Prelude.Right
-             (Prelude.Right (Prelude.Right GHC.Base.Nothing))))};
+             (Prelude.Right (Prelude.Right (Prelude.Right (Prelude.Right
+             (Prelude.Right (Prelude.Right (Prelude.Right (Prelude.Right
+             (Prelude.Right (Prelude.Right GHC.Base.Nothing))))))))))))};
           GHC.Base.Nothing -> Prelude.Right (Prelude.Right (Prelude.Right
-           (Prelude.Right (Prelude.Right GHC.Base.Nothing))))})
-        (case extension_KeyShare (chExtension (unsafeCoerce r)) of {
-          GHC.Base.Just a ->
-           case findKeyShare a serverGroups of {
-            GHC.Base.Just _ -> GHC.Base.Just (ExistT GetRandomBytes
-             (unsafeCoerce ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
-               ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
-               ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
-               ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
-               ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
-               ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
-               ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
-               ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
-               ((Prelude.+) 1 0))))))))))))))))))))))))))))))))));
+           (Prelude.Right (Prelude.Right (Prelude.Right (Prelude.Right
+           (Prelude.Right (Prelude.Right (Prelude.Right (Prelude.Right
+           (Prelude.Right (Prelude.Right GHC.Base.Nothing))))))))))))})
+        (case chooseCipher (chCiphers (fst (unsafeCoerce r))) ciphersuite_default of {
+          GHC.Base.Just _ ->
+           case extension_KeyShare (chExtension (fst (unsafeCoerce r))) of {
+            GHC.Base.Just a ->
+             case findKeyShare a serverGroups of {
+              GHC.Base.Just a0 ->
+               case decodeGroupPublic (ksGroup a0) (ksData a0) of {
+                Prelude.Left _ -> GHC.Base.Nothing;
+                Prelude.Right b -> GHC.Base.Just (ExistT GroupGetPubShared
+                 (unsafeCoerce b))};
+              GHC.Base.Nothing -> GHC.Base.Nothing};
             GHC.Base.Nothing -> GHC.Base.Nothing};
           GHC.Base.Nothing -> GHC.Base.Nothing}))))
       (sum_merge
         (prod_curry
-          (prod_curry (\_ r k ->
-            lift_tls GetRandomBytes (\_ -> Prelude.Left ((,)
-              (case hd_error (chCiphers r) of {
-                GHC.Base.Just a -> Prelude.Right (Prelude.Right (Prelude.Right
-                 (Prelude.Left ((,) ((,) ((,) () r) k) a))));
-                GHC.Base.Nothing -> Prelude.Right (Prelude.Right (Prelude.Right
-                 (Prelude.Right (Prelude.Right GHC.Base.Nothing))))})
-              (case hd_error (chCiphers r) of {
-                GHC.Base.Just _ -> GHC.Base.Just (ExistT GetRandomBytes
-                 (unsafeCoerce ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
-                   ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
-                   ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
-                   ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
-                   ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
-                   ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
-                   ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
-                   ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
-                   ((Prelude.+) 1 0))))))))))))))))))))))))))))))))));
-                GHC.Base.Nothing -> GHC.Base.Nothing}))))))
+          (prod_curry
+            (prod_curry
+              (prod_curry (\_ r c k _ ->
+                lift_tls GroupGetPubShared (\r0 -> Prelude.Left ((,)
+                  (case unsafeCoerce r0 of {
+                    GHC.Base.Just a -> Prelude.Right (Prelude.Right (Prelude.Right
+                     (Prelude.Left ((,) ((,) ((,) ((,) () r) c) k) a))));
+                    GHC.Base.Nothing -> Prelude.Right (Prelude.Right (Prelude.Right
+                     (Prelude.Right (Prelude.Right (Prelude.Right (Prelude.Right
+                     (Prelude.Right (Prelude.Right (Prelude.Right (Prelude.Right
+                     (Prelude.Right (Prelude.Right GHC.Base.Nothing))))))))))))})
+                  (case unsafeCoerce r0 of {
+                    GHC.Base.Just _ -> GHC.Base.Just (ExistT GetRandomBytes
+                     (unsafeCoerce ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
+                       ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
+                       ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
+                       ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
+                       ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
+                       ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
+                       ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
+                       ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
+                       ((Prelude.+) 1 0))))))))))))))))))))))))))))))))));
+                    GHC.Base.Nothing -> GHC.Base.Nothing}))))))))
         (sum_merge
           (prod_curry
             (prod_curry
-              (prod_curry (\_ r k c ->
-                lift_tls GetRandomBytes (\r0 -> Prelude.Left ((,) (Prelude.Right
-                  (Prelude.Right (Prelude.Right (Prelude.Right (Prelude.Left ((,)
-                  ((,) ((,) ((,) () r) k) c) (unsafeCoerce r0))))))) (GHC.Base.Just
-                  (ExistT SendPacket
-                  (unsafeCoerce handshake13 ((:)
-                    (serverHello13 (unsafeCoerce r0) (chSession r) c ((:)
-                      (extensionRaw_KeyShare (extensionEncode_KeyShare k)) ((:)
-                      (extensionRaw_SupportedVersions
-                        (extensionEncode_SupportedVersions tLS13)) []))) []))))))))))
+              (prod_curry
+                (prod_curry (\_ r c k p ->
+                  lift_tls GetRandomBytes (\r0 -> Prelude.Left ((,) (Prelude.Right
+                    (Prelude.Right (Prelude.Right (Prelude.Right (Prelude.Left ((,)
+                    ((,) ((,) ((,) ((,) () r) c) k) p) (unsafeCoerce r0)))))))
+                    (GHC.Base.Just (ExistT SendPacket
+                    (unsafeCoerce ((,)
+                      (handshake13 ((:)
+                        (serverHello13 (unsafeCoerce r0) (chSession (fst r))
+                          (cipherID c) ((:)
+                          (extensionRaw_KeyShare
+                            (extensionEncode_KeyShare (I.KeyShareEntry (ksGroup k)
+                              (encodeGroupPublic (fst p))))) ((:)
+                          (extensionRaw_SupportedVersions
+                            (extensionEncode_SupportedVersions tLS13)) []))) []))
+                      GHC.Base.Nothing)))))))))))
           (sum_merge
             (prod_curry
               (prod_curry
                 (prod_curry
-                  (prod_curry (\_ _ _ _ _ ->
-                    lift_tls SendPacket (\_ -> Prelude.Left ((,) (Prelude.Right
-                      (Prelude.Right (Prelude.Right (Prelude.Right (Prelude.Right
-                      (GHC.Base.Just ())))))) GHC.Base.Nothing))))))) (\o _ _ ->
-            Prelude.Right o)))))
+                  (prod_curry
+                    (prod_curry (\_ r c _ p _ ->
+                      lift_tls SendPacket (\r0 -> Prelude.Left ((,) (Prelude.Right
+                        (Prelude.Right (Prelude.Right (Prelude.Right (Prelude.Right
+                        (Prelude.Left ((,) ((,) ((,) ((,) () r) c) p)
+                        (unsafeCoerce r0)))))))) (GHC.Base.Just (ExistT SendPacket
+                        (unsafeCoerce ((,) changeCipherSpec GHC.Base.Nothing))))))))))))
+            (sum_merge
+              (prod_curry
+                (prod_curry
+                  (prod_curry
+                    (prod_curry (\_ r c p r0 ->
+                      lift_tls SendPacket (\_ -> Prelude.Left ((,) (Prelude.Right
+                        (Prelude.Right (Prelude.Right (Prelude.Right (Prelude.Right
+                        (Prelude.Right (Prelude.Left ((,) ((,) ((,) ((,) () r) c) p)
+                        r0)))))))) (GHC.Base.Just (ExistT SendPacket
+                        (unsafeCoerce ((,)
+                          (handshake13 ((:) (encryptedExtensions13 []) []))
+                          (GHC.Base.Just ((,) ((,) (cipherHash c) c)
+                          (hkdfExpandLabel (cipherHash c)
+                            (hkdfExtract (cipherHash c)
+                              (hkdfExpandLabel (cipherHash c)
+                                (hkdfExtract (cipherHash c)
+                                  (b_replicate (hashDigestSize (cipherHash c)) w0)
+                                  (b_replicate (hashDigestSize (cipherHash c)) w0))
+                                (s2b ((:) 'd' ((:) 'e' ((:) 'r' ((:) 'i' ((:) 'v'
+                                  ((:) 'e' ((:) 'd' ([])))))))))
+                                (hashWith (cipherHash c) ((:) (s2b ([])) []))
+                                (hashDigestSize (cipherHash c)))
+                              (ba_convert (snd p)))
+                            (s2b ((:) 's' ((:) ' ' ((:) 'h' ((:) 's' ((:) ' ' ((:)
+                              't' ((:) 'r' ((:) 'a' ((:) 'f' ((:) 'f' ((:) 'i' ((:)
+                              'c' ([]))))))))))))))
+                            (hashWith (cipherHash c) ((:) (snd r) ((:) r0 [])))
+                            (hashDigestSize (cipherHash c))))))))))))))))
+              (sum_merge
+                (prod_curry
+                  (prod_curry
+                    (prod_curry
+                      (prod_curry (\_ r c p r0 ->
+                        lift_tls SendPacket (\r1 -> Prelude.Left ((,) (Prelude.Right
+                          (Prelude.Right (Prelude.Right (Prelude.Right
+                          (Prelude.Right (Prelude.Right (Prelude.Right (Prelude.Left
+                          ((,) ((,) ((,) ((,) ((,) () r) c) p) r0)
+                          (unsafeCoerce r1)))))))))) (GHC.Base.Just (ExistT GenKeys
+                          (unsafeCoerce ()))))))))))
+                (sum_merge
+                  (prod_curry
+                    (prod_curry
+                      (prod_curry
+                        (prod_curry
+                          (prod_curry (\_ r c p r0 r1 ->
+                            lift_tls GenKeys (\r2 -> Prelude.Left ((,)
+                              (Prelude.Right (Prelude.Right (Prelude.Right
+                              (Prelude.Right (Prelude.Right (Prelude.Right
+                              (Prelude.Right (Prelude.Right (Prelude.Left ((,) ((,)
+                              ((,) ((,) ((,) ((,) () r) c) p) r0) r1)
+                              (unsafeCoerce r2))))))))))) (GHC.Base.Just (ExistT
+                              SendPacket
+                              (unsafeCoerce ((,)
+                                (handshake13 ((:)
+                                  (certificate13 empty
+                                    (defaultCertChain (fst (unsafeCoerce r2))) ((:)
+                                    [] [])) [])) (GHC.Base.Just ((,) ((,)
+                                (cipherHash c) c)
+                                (hkdfExpandLabel (cipherHash c)
+                                  (hkdfExtract (cipherHash c)
+                                    (hkdfExpandLabel (cipherHash c)
+                                      (hkdfExtract (cipherHash c)
+                                        (b_replicate (hashDigestSize (cipherHash c))
+                                          w0)
+                                        (b_replicate (hashDigestSize (cipherHash c))
+                                          w0))
+                                      (s2b ((:) 'd' ((:) 'e' ((:) 'r' ((:) 'i' ((:)
+                                        'v' ((:) 'e' ((:) 'd' ([])))))))))
+                                      (hashWith (cipherHash c) ((:) (s2b ([])) []))
+                                      (hashDigestSize (cipherHash c)))
+                                    (ba_convert (snd p)))
+                                  (s2b ((:) 's' ((:) ' ' ((:) 'h' ((:) 's' ((:) ' '
+                                    ((:) 't' ((:) 'r' ((:) 'a' ((:) 'f' ((:) 'f'
+                                    ((:) 'i' ((:) 'c' ([]))))))))))))))
+                                  (hashWith (cipherHash c) ((:) (snd r) ((:) r0
+                                    []))) (hashDigestSize (cipherHash c)))))))))))))))))
+                  (sum_merge
+                    (prod_curry
+                      (prod_curry
+                        (prod_curry
+                          (prod_curry
+                            (prod_curry
+                              (prod_curry (\_ r c p r0 r1 r2 ->
+                                lift_tls SendPacket (\r3 -> Prelude.Left ((,)
+                                  (Prelude.Right (Prelude.Right (Prelude.Right
+                                  (Prelude.Right (Prelude.Right (Prelude.Right
+                                  (Prelude.Right (Prelude.Right (Prelude.Right
+                                  (Prelude.Left ((,) ((,) ((,) ((,) ((,) ((,) ((,)
+                                  () r) c) p) r0) r1) r2)
+                                  (unsafeCoerce r3)))))))))))) (GHC.Base.Just
+                                  (ExistT SendPacket
+                                  (unsafeCoerce ((,)
+                                    (handshake13 ((:)
+                                      (makeCertVerify (snd r2)
+                                        (hashWith (cipherHash c) ((:) (snd r) ((:)
+                                          r0 ((:) r1 ((:) (unsafeCoerce r3) []))))))
+                                      [])) (GHC.Base.Just ((,) ((,) (cipherHash c)
+                                    c)
+                                    (hkdfExpandLabel (cipherHash c)
+                                      (hkdfExtract (cipherHash c)
+                                        (hkdfExpandLabel (cipherHash c)
+                                          (hkdfExtract (cipherHash c)
+                                            (b_replicate
+                                              (hashDigestSize (cipherHash c)) w0)
+                                            (b_replicate
+                                              (hashDigestSize (cipherHash c)) w0))
+                                          (s2b ((:) 'd' ((:) 'e' ((:) 'r' ((:) 'i'
+                                            ((:) 'v' ((:) 'e' ((:) 'd' ([])))))))))
+                                          (hashWith (cipherHash c) ((:) (s2b ([]))
+                                            [])) (hashDigestSize (cipherHash c)))
+                                        (ba_convert (snd p)))
+                                      (s2b ((:) 's' ((:) ' ' ((:) 'h' ((:) 's' ((:)
+                                        ' ' ((:) 't' ((:) 'r' ((:) 'a' ((:) 'f' ((:)
+                                        'f' ((:) 'i' ((:) 'c' ([]))))))))))))))
+                                      (hashWith (cipherHash c) ((:) (snd r) ((:) r0
+                                        []))) (hashDigestSize (cipherHash c))))))))))))))))))
+                    (sum_merge
+                      (prod_curry
+                        (prod_curry
+                          (prod_curry
+                            (prod_curry
+                              (prod_curry
+                                (prod_curry
+                                  (prod_curry (\_ r c p r0 r1 r2 r3 ->
+                                    lift_tls SendPacket (\r4 -> Prelude.Left ((,)
+                                      (Prelude.Right (Prelude.Right (Prelude.Right
+                                      (Prelude.Right (Prelude.Right (Prelude.Right
+                                      (Prelude.Right (Prelude.Right (Prelude.Right
+                                      (Prelude.Right (Prelude.Left ((,) ((,) ((,)
+                                      ((,) ((,) ((,) ((,) ((,) () r) c) p) r0) r1)
+                                      r2) r3) (unsafeCoerce r4)))))))))))))
+                                      (GHC.Base.Just (ExistT SendPacket
+                                      (unsafeCoerce ((,)
+                                        (handshake13 ((:)
+                                          (finished13
+                                            (makeVerifyData (cipherHash c)
+                                              (hkdfExpandLabel (cipherHash c)
+                                                (hkdfExtract (cipherHash c)
+                                                  (hkdfExpandLabel (cipherHash c)
+                                                    (hkdfExtract (cipherHash c)
+                                                      (b_replicate
+                                                        (hashDigestSize
+                                                          (cipherHash c)) w0)
+                                                      (b_replicate
+                                                        (hashDigestSize
+                                                          (cipherHash c)) w0))
+                                                    (s2b ((:) 'd' ((:) 'e' ((:) 'r'
+                                                      ((:) 'i' ((:) 'v' ((:) 'e'
+                                                      ((:) 'd' ([])))))))))
+                                                    (hashWith (cipherHash c) ((:)
+                                                      (s2b ([])) []))
+                                                    (hashDigestSize (cipherHash c)))
+                                                  (ba_convert (snd p)))
+                                                (s2b ((:) 's' ((:) ' ' ((:) 'h' ((:)
+                                                  's' ((:) ' ' ((:) 't' ((:) 'r'
+                                                  ((:) 'a' ((:) 'f' ((:) 'f' ((:)
+                                                  'i' ((:) 'c' ([]))))))))))))))
+                                                (hashWith (cipherHash c) ((:)
+                                                  (snd r) ((:) r0 [])))
+                                                (hashDigestSize (cipherHash c)))
+                                              (hashWith (cipherHash c) ((:) 
+                                                (snd r) ((:) r0 ((:) r1 ((:) r3 ((:)
+                                                (unsafeCoerce r4) [])))))))) []))
+                                        (GHC.Base.Just ((,) ((,) (cipherHash c) c)
+                                        (hkdfExpandLabel (cipherHash c)
+                                          (hkdfExtract (cipherHash c)
+                                            (hkdfExpandLabel (cipherHash c)
+                                              (hkdfExtract (cipherHash c)
+                                                (b_replicate
+                                                  (hashDigestSize (cipherHash c))
+                                                  w0)
+                                                (b_replicate
+                                                  (hashDigestSize (cipherHash c))
+                                                  w0))
+                                              (s2b ((:) 'd' ((:) 'e' ((:) 'r' ((:)
+                                                'i' ((:) 'v' ((:) 'e' ((:) 'd'
+                                                ([])))))))))
+                                              (hashWith (cipherHash c) ((:)
+                                                (s2b ([])) []))
+                                              (hashDigestSize (cipherHash c)))
+                                            (ba_convert (snd p)))
+                                          (s2b ((:) 's' ((:) ' ' ((:) 'h' ((:) 's'
+                                            ((:) ' ' ((:) 't' ((:) 'r' ((:) 'a' ((:)
+                                            'f' ((:) 'f' ((:) 'i' ((:) 'c'
+                                            ([]))))))))))))))
+                                          (hashWith (cipherHash c) ((:) (snd r) ((:)
+                                            r0 [])))
+                                          (hashDigestSize (cipherHash c)))))))))))))))))))
+                      (sum_merge
+                        (prod_curry
+                          (prod_curry
+                            (prod_curry
+                              (prod_curry
+                                (prod_curry
+                                  (prod_curry
+                                    (prod_curry
+                                      (prod_curry (\_ r c p r0 r1 r2 r3 r4 ->
+                                        lift_tls SendPacket (\r5 -> Prelude.Left
+                                          ((,) (Prelude.Right (Prelude.Right
+                                          (Prelude.Right (Prelude.Right
+                                          (Prelude.Right (Prelude.Right
+                                          (Prelude.Right (Prelude.Right
+                                          (Prelude.Right (Prelude.Right
+                                          (Prelude.Right (Prelude.Left ((,) ((,)
+                                          ((,) ((,) ((,) ((,) ((,) ((,) ((,) () r)
+                                          c) p) r0) r1) r2) r3) r4)
+                                          (unsafeCoerce r5))))))))))))))
+                                          (GHC.Base.Just (ExistT RecvCCS
+                                          (unsafeCoerce ()))))))))))))))
+                        (sum_merge
+                          (prod_curry
+                            (prod_curry
+                              (prod_curry
+                                (prod_curry
+                                  (prod_curry
+                                    (prod_curry
+                                      (prod_curry
+                                        (prod_curry
+                                          (prod_curry (\_ r c p r0 r1 r2 r3 r4 r5 ->
+                                            lift_tls RecvCCS (\_ -> Prelude.Left
+                                              ((,) (Prelude.Right (Prelude.Right
+                                              (Prelude.Right (Prelude.Right
+                                              (Prelude.Right (Prelude.Right
+                                              (Prelude.Right (Prelude.Right
+                                              (Prelude.Right (Prelude.Right
+                                              (Prelude.Right (Prelude.Right
+                                              (Prelude.Left ((,) ((,) ((,) ((,) ((,)
+                                              ((,) ((,) ((,) ((,) () r) c) p) r0)
+                                              r1) r2) r3) r4) r5))))))))))))))
+                                              (GHC.Base.Just (ExistT RecvFinished
+                                              (unsafeCoerce (GHC.Base.Just ((,) ((,)
+                                                (cipherHash c) c)
+                                                (hkdfExpandLabel (cipherHash c)
+                                                  (hkdfExtract (cipherHash c)
+                                                    (hkdfExpandLabel (cipherHash c)
+                                                      (hkdfExtract (cipherHash c)
+                                                        (b_replicate
+                                                          (hashDigestSize
+                                                            (cipherHash c)) w0)
+                                                        (b_replicate
+                                                          (hashDigestSize
+                                                            (cipherHash c)) w0))
+                                                      (s2b ((:) 'd' ((:) 'e' ((:)
+                                                        'r' ((:) 'i' ((:) 'v' ((:)
+                                                        'e' ((:) 'd' ([])))))))))
+                                                      (hashWith (cipherHash c) ((:)
+                                                        (s2b ([])) []))
+                                                      (hashDigestSize
+                                                        (cipherHash c)))
+                                                    (ba_convert (snd p)))
+                                                  (s2b ((:) 'c' ((:) ' ' ((:) 'h'
+                                                    ((:) 's' ((:) ' ' ((:) 't' ((:)
+                                                    'r' ((:) 'a' ((:) 'f' ((:) 'f'
+                                                    ((:) 'i' ((:) 'c'
+                                                    ([]))))))))))))))
+                                                  (hashWith (cipherHash c) ((:)
+                                                    (snd r) ((:) r0 [])))
+                                                  (hashDigestSize (cipherHash c))))))))))))))))))))
+                          (sum_merge
+                            (prod_curry
+                              (prod_curry
+                                (prod_curry
+                                  (prod_curry
+                                    (prod_curry
+                                      (prod_curry
+                                        (prod_curry
+                                          (prod_curry
+                                            (prod_curry
+                                              (\_ r c p r0 r1 r2 r3 r4 r5 ->
+                                              lift_tls RecvFinished (\r6 ->
+                                                Prelude.Left ((,)
+                                                (case byteString_beq
+                                                        (unsafeCoerce r6)
+                                                        (makeVerifyData
+                                                          (cipherHash c)
+                                                          (hkdfExpandLabel
+                                                            (cipherHash c)
+                                                            (hkdfExtract
+                                                              (cipherHash c)
+                                                              (hkdfExpandLabel
+                                                                (cipherHash c)
+                                                                (hkdfExtract
+                                                                  (cipherHash c)
+                                                                  (b_replicate
+                                                                    (hashDigestSize
+                                                                      (cipherHash c))
+                                                                    w0)
+                                                                  (b_replicate
+                                                                    (hashDigestSize
+                                                                      (cipherHash c))
+                                                                    w0))
+                                                                (s2b ((:) 'd' ((:)
+                                                                  'e' ((:) 'r' ((:)
+                                                                  'i' ((:) 'v' ((:)
+                                                                  'e' ((:) 'd'
+                                                                  ([])))))))))
+                                                                (hashWith
+                                                                  (cipherHash c)
+                                                                  ((:) (s2b ([]))
+                                                                  []))
+                                                                (hashDigestSize
+                                                                  (cipherHash c)))
+                                                              (ba_convert (snd p)))
+                                                            (s2b ((:) 'c' ((:) ' '
+                                                              ((:) 'h' ((:) 's' ((:)
+                                                              ' ' ((:) 't' ((:) 'r'
+                                                              ((:) 'a' ((:) 'f' ((:)
+                                                              'f' ((:) 'i' ((:) 'c'
+                                                              ([]))))))))))))))
+                                                            (hashWith (cipherHash c)
+                                                              ((:) (snd r) ((:) r0
+                                                              [])))
+                                                            (hashDigestSize
+                                                              (cipherHash c)))
+                                                          (hashWith (cipherHash c)
+                                                            ((:) (snd r) ((:) r0
+                                                            ((:) r1 ((:) r3 ((:) r4
+                                                            ((:) r5 [])))))))) of {
+                                                  GHC.Base.True -> Prelude.Right
+                                                   (Prelude.Right (Prelude.Right
+                                                   (Prelude.Right (Prelude.Right
+                                                   (Prelude.Right (Prelude.Right
+                                                   (Prelude.Right (Prelude.Right
+                                                   (Prelude.Right (Prelude.Right
+                                                   (Prelude.Right (Prelude.Right
+                                                   (GHC.Base.Just ((,) ((,) ((,)
+                                                   (hkdfExpandLabel (cipherHash c)
+                                                     (hkdfExtract (cipherHash c)
+                                                       (hkdfExpandLabel
+                                                         (cipherHash c)
+                                                         (hkdfExtract (cipherHash c)
+                                                           (b_replicate
+                                                             (hashDigestSize
+                                                               (cipherHash c)) w0)
+                                                           (b_replicate
+                                                             (hashDigestSize
+                                                               (cipherHash c)) w0))
+                                                         (s2b ((:) 'd' ((:) 'e' ((:)
+                                                           'r' ((:) 'i' ((:) 'v'
+                                                           ((:) 'e' ((:) 'd'
+                                                           ([])))))))))
+                                                         (hashWith (cipherHash c)
+                                                           ((:) (s2b ([])) []))
+                                                         (hashDigestSize
+                                                           (cipherHash c)))
+                                                       (ba_convert (snd p)))
+                                                     (s2b ((:) 's' ((:) ' ' ((:) 'h'
+                                                       ((:) 's' ((:) ' ' ((:) 't'
+                                                       ((:) 'r' ((:) 'a' ((:) 'f'
+                                                       ((:) 'f' ((:) 'i' ((:) 'c'
+                                                       ([]))))))))))))))
+                                                     (hashWith (cipherHash c) ((:)
+                                                       (snd r) ((:) r0 [])))
+                                                     (hashDigestSize (cipherHash c)))
+                                                   (hashWith (cipherHash c) ((:)
+                                                     (snd r) ((:) r0 ((:) r1 ((:) r3
+                                                     ((:) r4 [])))))))
+                                                   (makeCertVerify (snd r2)
+                                                     (hashWith (cipherHash c) ((:)
+                                                       (snd r) ((:) r0 ((:) r1 ((:)
+                                                       r3 [])))))))
+                                                   (fst r2)))))))))))))));
+                                                  GHC.Base.False -> Prelude.Right
+                                                   (Prelude.Right (Prelude.Right
+                                                   (Prelude.Right (Prelude.Right
+                                                   (Prelude.Right (Prelude.Right
+                                                   (Prelude.Right (Prelude.Right
+                                                   (Prelude.Right (Prelude.Right
+                                                   (Prelude.Right (Prelude.Right
+                                                   GHC.Base.Nothing))))))))))))})
+                                                GHC.Base.Nothing))))))))))))
+                            (\o _ _ -> Prelude.Right o)))))))))))))
 

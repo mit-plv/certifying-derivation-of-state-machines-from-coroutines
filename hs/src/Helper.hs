@@ -1,12 +1,45 @@
-{-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE BangPatterns, OverloadedStrings #-}
 
 module Helper where
 
 import Network.TLS
 import Network.TLS.Internal
 import qualified Data.ByteString as B
+import qualified Data.ByteArray as B (convert)
 import Data.List
 import Data.Maybe
+import qualified Data.X509 as X
+import qualified Crypto.PubKey.RSA as RSA
+import qualified Crypto.PubKey.RSA.PSS as PSS
+import qualified Crypto.Hash.Algorithms as A
+import qualified Crypto.Hash as H
+import Certificate
+
+sniExt :: ExtensionRaw
+sniExt = ExtensionRaw extensionID_ServerName ""
+
+makeCertVerify :: RSA.PrivateKey -> B.ByteString -> Handshake13
+makeCertVerify priv bs = 
+  let params = PSS.defaultPSSParams A.SHA384
+  in
+  case PSS.signWithSalt (B.replicate (PSS.pssSaltLength params) 0)  Nothing params priv (makeTarget bs) of
+    Right signed ->
+      CertVerify13 (HashIntrinsic, SignatureRSApssRSAeSHA384) signed
+
+makeTarget :: B.ByteString -> B.ByteString
+makeTarget hashValue = runPut $ do
+    putBytes $ B.replicate 64 32
+    putBytes ("TLS 1.3, server CertificateVerify" :: B.ByteString)
+    putWord8 0
+    putBytes hashValue
+
+hashWith :: Hash -> [B.ByteString] -> B.ByteString
+hashWith SHA1 bss = B.convert $ H.hashFinalize $ H.hashUpdates (H.hashInit :: H.Context H.SHA1) bss
+hashWith MD5 bss = B.convert $ H.hashFinalize $ H.hashUpdates (H.hashInit :: H.Context H.MD5) bss
+hashWith SHA224 bss = B.convert $ H.hashFinalize $ H.hashUpdates (H.hashInit :: H.Context H.SHA224) bss
+hashWith SHA256 bss = B.convert $ H.hashFinalize $ H.hashUpdates (H.hashInit :: H.Context H.SHA256) bss
+hashWith SHA384 bss = B.convert $ H.hashFinalize $ H.hashUpdates (H.hashInit :: H.Context H.SHA384) bss
+hashWith SHA512 bss = B.convert $ H.hashFinalize $ H.hashUpdates (H.hashInit :: H.Context H.SHA512) bss
 
 extensionLookup :: ExtensionID -> [ExtensionRaw] -> Maybe B.ByteString
 extensionLookup toFind = fmap (\(ExtensionRaw _ content) -> content)
@@ -51,3 +84,5 @@ supportedGroups' = [P256,P384,P521,X25519]
 serverGroups :: ([]) Group
 serverGroups =
   supportedGroups'
+
+defaultCertChain pubKey = X.CertificateChain [simpleX509 $ PubKeyRSA pubKey]
