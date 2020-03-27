@@ -75,10 +75,10 @@ Definition equiv_coro A B state
       step init yield r = inl (s r, op r)
       /\ equiv' (ret_type := unit) step (s r) (p r) (op r).
 
-Definition seqE (A B C:Set) (e : t (const_yield A) (const_yield B) unit)
+Definition seqE (A B C ef:Set)(args rets : ef -> Set) (e : t (const_yield A) (const_yield B) unit)
   : (A -> (B -> t (const_yield A) (const_yield B) unit) ->
-     t args_effect rets_effect (option C)) ->
-    t args_effect rets_effect (option C) :=
+     t args rets (option C)) ->
+    t args rets (option C) :=
   match e with
   | Return _ _ c => fun _ => Return _ _ None
   | Eff _ a p => fun cont => cont a p
@@ -88,11 +88,11 @@ Definition coro_type A B state
            (_ : step_type (const_yield A) (const_yield B) unit state):=
   B -> t (const_yield A)(const_yield B) unit.
 
-Definition proc_coro (A B C state : Set)
+Definition proc_coro (A B C ef : Set)(args rets : ef -> Set)(state : Set)
            (step : step_type (const_yield A)(const_yield B) unit state)
            (c : coro_type step) (x : B)
-  : (A -> coro_type step -> t args_effect rets_effect (option C)) ->
-    t args_effect rets_effect (option C) :=
+  : (A -> coro_type step -> t args rets (option C)) ->
+    t args rets (option C) :=
   seqE (c x).
 
 
@@ -133,10 +133,10 @@ Definition get_put : t args_effect rets_effect nat :=
   putN (S n);
   Return _ _ (S n).
 
-Definition seqE' A C state
+Definition seqE' A C (ef:Set) (args rets:ef -> Set) state
            (x : (state * option { e : yield_effect & A }) + unit)
-           (f : state -> A -> t args_effect rets_effect C)
-           (f0 : t args_effect rets_effect C) :=
+           (f : state -> A -> t args rets C)
+           (f0 : t args rets C) :=
   match x with
   | inl (s, Some (existT _ v)) => f s v
   | _ => f0
@@ -279,7 +279,7 @@ Ltac st_op_to_ev :=
     cbv beta
   end.
 
-Lemma derive_parent_rect : forall state A C N (a0:A) f f0 st0 stS op0 opS step,
+Lemma derive_nat_rect : forall state A C (eff : Set)(args rets : eff -> Set) N (a0:A) f f0 st0 stS op0 opS step,
     (forall a, equiv' step (st0 a) (f a a) (op0 a)) ->
     (forall N0,
         (forall a, equiv' step (match N0 with O => st0 a | S N0' => stS a N0' end) (nat_rect_nondep (f a) (f0 a) N0 a) (match N0 with O => op0 a | S N0' => opS a N0' end)) ->
@@ -288,14 +288,14 @@ Lemma derive_parent_rect : forall state A C N (a0:A) f f0 st0 stS op0 opS step,
                               (nat_rect_nondep
                                     (f a) (f0 a)
                                     N0) a) (opS a N0))) ->
-    @equiv' _ args_effect rets_effect C state step (match N with O => st0 a0 | S N0 => stS a0 N0 end) (nat_rect_nondep (f a0) (f0 a0) N a0) (match N with O => op0 a0 | S N0 => opS a0 N0 end).
+    @equiv' _ args rets C state step (match N with O => st0 a0 | S N0 => stS a0 N0 end) (nat_rect_nondep (f a0) (f0 a0) N a0) (match N with O => op0 a0 | S N0 => opS a0 N0 end).
 Proof.
   intros.
   revert a0.
   induction N; intros; simpl; auto.
 Qed.
 
-Lemma derive_list_rec : forall state A B C (l : list B)(a0:A) f f0 st0 stS op0 opS step,
+Lemma derive_list_rec : forall state A B C (eff : Set)(args rets : eff -> Set)(l : list B)(a0:A) f f0 st0 stS op0 opS step,
     (forall a, equiv' step (st0 a) (f a a) (op0 a)) ->
     (forall b0 l0,
         (forall a,
@@ -308,7 +308,7 @@ Lemma derive_list_rec : forall state A B C (l : list B)(a0:A) f f0 st0 stS op0 o
                               (list_rec_nondep
                                  (f a) (f0 a)
                                  l0) a) (opS a b0 l0))) ->
-    @equiv' _ args_effect rets_effect C state step
+    @equiv' _ args rets C state step
             (match l with [] => st0 a0 | b::l' => stS a0 b l' end)
             (list_rec_nondep (f a0) (f0 a0) l a0)
             (match l with [] => op0 a0 | b::l' => opS a0 b l' end).
@@ -361,12 +361,12 @@ Proof.
 Qed.
 
 Lemma derive_seqE' :
-  forall A C state state'
+  forall A C (eff : Set)(args rets : eff -> Set)state state'
          (x : (state' * option { _ : yield_effect & A }) + unit)
          f f0 g g0 h h0 step,
     (forall s v, equiv' step (g s v) (f s v) (h s v)) ->
     equiv' step g0 f0 h0 ->
-    @equiv' _ _ _ C state step
+    @equiv' _ args rets C state step
             (match x with
              | inl (s, Some (existT _ v)) => g s v
              | _ => g0
@@ -389,9 +389,9 @@ Proof.
   auto.
 Qed.
 
-Definition step_state (A B C state : Set)
+Definition step_state (A B C eff : Set)(args rets : eff -> Set)(state : Set)
            (step : step_type (const_yield A)(const_yield B) unit state) st x g :=
-  seqE' (step st yield x) (fun s v => g v s) (Return _ _ (@None C)).
+  seqE' (step st yield x) (fun s v => g v s) (Return args rets (@None C)).
 
 Lemma equal_f_dep : forall A (T : A -> Set) B (f g : forall a, T a -> B) a0,
     f = g -> f a0 = g a0.
@@ -467,38 +467,7 @@ Ltac dest_step' :=
       lazymatch goal with
         |- _ = ?rhs =>
         lazymatch ef with
-          (*
-        | putNat =>
-          change rhs with
-          ((fun e => match e as e0 return rets_effect e0 -> T1+T2 with
-                     | putNat => rhs
-                     | _ => fun _ => inr None
-                     end) ef)
-        | getNat =>
-          change rhs with
-          ((fun e => match e as e0 return rets_effect e0 -> T1+T2 with
-                     | getNat => rhs
-                     | _ => fun _ => inr None
-                     end) ef)
-        | putString =>
-          change rhs with
-          ((fun e => match e as e0 return rets_effect e0 -> T1+T2 with
-                                | putString => rhs
-                                | _ => fun _ => inr None
-                                end) ef)
-        | getString =>
-          change rhs with
-          ((fun e => match e as e0 return rets_effect e0 -> T1+T2 with
-                                | getString => rhs
-                                | _ => fun _ => inr None
-                                end) ef)
-*)
         | yield =>
-          (*
-          let tmp := fresh in
-          set (tmp := (fun _ => rhs yield));
-          replace rhs with tmp by (unfold tmp; auto);
-          subst tmp*)
           change rhs with ((fun _ => rhs) yield)
         | _ => change rhs with (lift_eff ef rhs ef)
         end
@@ -586,7 +555,7 @@ Ltac derive_core ptr env :=
          | H : ?p |- _ => apply H
          end))
       ||
-      (eapply (derive_parent_rect _ _ (fun a b => _) (fun a => _) (fun a => _));
+      (eapply (derive_nat_rect _ _ (fun a b => _) (fun a => _) (fun a => _));
        [ let a := fresh in
          intro a;
          cbv beta;
@@ -623,18 +592,6 @@ Ltac derive_core ptr env :=
     end
   end.
 
-(*
-Definition replace A i l (a:A) :=
-  (fix aux i l pre :=
-    match l with
-    | [] => []
-    | x::l' =>
-      match i with
-      | O => pre ++ a :: l'
-      | S i' => aux i' l' (pre ++ [x])
-      end
-    end) i l [].*)
-
 Definition pipe A B (a : A)(f : A -> B) := f a.
 
 Instance coro_type_inhabitant A B state step :
@@ -644,8 +601,8 @@ Instance coro_type_inhabitant A B state step :
 Instance t_inhabitant e a r (c:Set) `{IC : Inhabit c} : Inhabit (@t e a r c) :=
   { inhabitant := Return _ _ inhabitant }.
 
-Definition seq_abs A B R state
-           (step : step_type (const_yield A)(const_yield B) R state) (x:B) C (_:C) (g : A -> C -> t args_effect rets_effect R ) := t_inhabitant.
+Definition seq_abs A B (eff : Set) (args rets : eff -> Set) R state
+           (step : step_type (const_yield A)(const_yield B) R state) (x:B) C (_:C) (g : A -> C -> t args rets R ) := t_inhabitant.
 
 
 Opaque dummy.
@@ -657,9 +614,13 @@ Definition equiv_coro' (A B C :Set) `{IA : Inhabit A} `{IB : Inhabit B} state
   exists op, equiv' step st (r <- yield inhabitant; coro r) op.
 
 Ltac get_init c :=
-  let init := open_constr:(_) in
-  let _ := constr:(ltac:(auto with equivc) : equiv_coro' _ init c) in
-  init.
+  lazymatch type of c with
+  | ?B -> t (const_yield ?A) (const_yield _) ?C =>
+    let init := open_constr:(_) in
+    let step := open_constr:(_) in
+  let _ := constr:(ltac:(auto with equivc) : @equiv_coro' A B C _ _ _ step init c) in
+  init
+  end.
 
 Ltac opt_match_fun expr :=
   lazymatch expr with
@@ -689,14 +650,14 @@ Ltac to_dummy i p :=
         constr:((pipe, init, g))
       end
     end
-  | @Eff _ args_effect rets_effect ?C ?e ?a ?f =>
+  | @Eff ?eff ?args ?rets ?C ?e ?a ?f =>
     let x := (eval cbv beta in (f (dummy _ _ i))) in
     let d := to_dummy (S i) x in
-    lazymatch (eval pattern (dummy _ (rets_effect e) i) in d) with
+    lazymatch (eval pattern (dummy _ (rets e) i) in d) with
     | ?g _ =>
-      constr:((@Eff _ args_effect rets_effect C e a, g))
+      constr:((@Eff eff args rets C e a, g))
     end
-  | @proc_coro ?A ?B ?C ?state ?step ?c ?z ?f =>
+  | @proc_coro ?A ?B ?C ?eff ?args ?rets ?state ?step ?c ?z ?f =>
     let x := (eval cbv beta in (f (dummy _ _ i) (dummy _ _ (S i)))) in
     lazymatch f with
     | context [proc_coro] =>
@@ -705,11 +666,11 @@ Ltac to_dummy i p :=
       | _ -> ?T -> _ =>
         lazymatch (eval pattern (dummy _ A i), (dummy _ T (S i)) in d) with
         | ?g _ _ =>
-          constr:((@seq_abs A B C state step z (coro_type step) c, g))
+          constr:((@seq_abs A B eff args rets C state step z (coro_type step) c, g))
         end
       end
     | _ =>
-      constr:((@seq_abs A B C state step z (coro_type step) c, f))
+      constr:((@seq_abs A B eff args rets C state step z (coro_type step) c, f))
     end
   | (match ?o with Some _ => _ | None => ?f0 end) =>
     let f := opt_match_fun p in
@@ -755,12 +716,12 @@ Ltac reconstruct tree i :=
         constr:(Eff e a p'')
       end
     end
-  | (@seq_abs ?A ?B ?C _ ?step ?z ?state ?st, ?p) =>
+  | (@seq_abs ?A ?B ?eff ?args ?rets ?C _ ?step ?z ?state ?st, ?p) =>
     let x := (eval cbv beta in (p (dummy _ _ i) (dummy _ _ (S i)))) in
     let p' := reconstruct x (S (S i)) in
     lazymatch (eval pattern (dummy _ A i), (dummy _ state (S i)) in p') with
     | ?p'' _ _ =>
-      constr:(@step_state A B C _ step st z p'')
+      constr:(@step_state A B C eff args rets _ step st z p'')
     end
   | (@option_branch ?A ?B, ?f, ?f0, ?o) =>
     let x := (eval cbv beta in (f (dummy _ _ i))) in
@@ -798,22 +759,6 @@ Ltac coro_to_state p :=
 
 Transparent proc_coro.
 
-(*
-Definition loop_ex (n i : nat)(g : forall A, A -> t args_effect rets_effect) :=
-  pipe (ex_coroutine 0 : coro_type (projT1 (projT2 ex_coroutine_derive')))
-       (fun c0 =>
-          nat_rect_nondep
-            (fun l =>
-               option_branch
-                        (fun c => g _ c)
-                        (Done _ _)
-                        (nth_err _ l i))
-            (fun m rec l =>
-               pipe (ex_coroutine m : coro_type (projT1 (projT2 ex_coroutine_derive')))
-                    (fun cm =>
-                       rec (cm::l)))
-            n [c0]).
-*)
 Ltac get_step c :=
   let step := open_constr:(_) in
   let _ := constr:(ltac:(auto with equivc') : equiv_coro' step _ c) in
@@ -989,7 +934,7 @@ Definition loop_ex (n i : nat) :=
              r <- resume c $ 1;
                putN r;
                Return _ _ (Some tt)
-           | None => Return _ _ None
+           | None => Return args_effect rets_effect None
            end)
         (fun m rec l =>
            putN (0:args_effect putNat);
@@ -1275,19 +1220,6 @@ Ltac derive env :=
       end
     end
   end.
-
-
-(*
-Lemma loop_ex_eq k n :
-  loop_ex k n =
-  ltac:(let x := (eval red in (loop_ex k n)) in
-        let x' := coro_to_state x in exact x').
-Proof.
-  unfold loop_ex.
-  unfold pipe.
-  repeat mid_eq_core.
-Qed.
-*)
 
 Definition loop_ex_derive n i :
   { state & { step & { init | @equiv _ _ _ _ state step init (loop_ex n i) }}}.
@@ -1792,7 +1724,7 @@ Definition echo_equiv' n
 Hint Resolve echo_equiv echo_equiv' : equivc equivc'.
 Hint Resolve echo_equiv : equivc'.
 
-Definition sendHello fuel :=
+Definition sendHello fuel : t args_effect rets_effect (option unit) :=
   let_coro c0 := echo "c0" in
   let_coro c1 := echo "c1" in
   nat_rect_nondep
@@ -1827,3 +1759,19 @@ Proof.
   unshelve derive (tt,fuel); exact inhabitant.
 Defined.
 
+
+Definition echo_loop fuel name s :
+  t (const_yield String.string) (const_yield String.string) unit :=
+    nat_rect_nondep
+      (fun _ => Return tt)
+      (fun fuel' rec s =>
+         s' <- yield (String.append s name);
+           rec s')
+      fuel s.
+
+Lemma echo_loop_derive :
+  { state & { step & forall fuel name, { init | @equiv_coro' _ _ _ _ _ state step init (echo_loop fuel name) }}}.
+Proof.
+  do 3 eexists.
+  unshelve derive_coro (tt,fuel,name); exact inhabitant.
+Defined.

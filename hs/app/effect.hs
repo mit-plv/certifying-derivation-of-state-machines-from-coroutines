@@ -1,5 +1,6 @@
 {-# LANGUAGE ScopedTypeVariables, OverloadedStrings #-}
 
+import System.Environment
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8 as C
 import Network.Socket
@@ -18,66 +19,64 @@ import Helper
 
 main :: IO ()
 main = withSocketsDo $ do
-  ms <- newIORef $ fromInteger 0
-  sock <- socket AF_INET Stream 0
-  bind sock (SockAddrInet 8001 iNADDR_ANY)  
-  listen sock 2
-  (s,_) <- accept sock
-  core s (Left ()) RecvClientHello ms (unsafeCoerce 1) 
---  ehs <- recvHandshakes s
-  --SB.sendAll s $ C.pack "this is a dummy message"
---  case ehs of
-    --Right hs -> print hs
+  args <- getArgs
+  ecred <- credentialLoadX509 (args !! 0) (args !! 1)
+  case ecred of
+    Right (cert,priv) -> do
+      sock <- socket AF_INET Stream 0
+      bind sock (SockAddrInet 8001 iNADDR_ANY)  
+      listen sock 2
+      (s,_) <- accept sock
+      core s (Left (((), cert), priv)) RecvClientHello (unsafeCoerce 1) 
+    Left s ->
+      putStrLn s
 
-core sock x ef ms (r::Any) = do
+core sock x ef (r::Any) = do
   case doHandshake_step x ef (unsafeCoerce r) of
     Right res ->
       case res of
-        Just (((msgs,hashed),cv@(I.CertVerify13 _ sig)), pub) -> do
-          putStrLn "messages:"
-          print $ msgs
-          putStrLn "\nhashed:"
-          print hashed
-          putStrLn "\ncertverify:"
-          print cv 
-          putStrLn "\nverify:"
-          print $ RSA.verify (RSA.defaultPSSParams A.SHA384) pub (makeTarget hashed) sig
-          putStrLn "\nDone"
+        Just x -> do
+          close sock
         _ -> putStrLn "Done"
-    Left (next, Nothing) -> core sock next RecvClientHello ms (unsafeCoerce 0) 
+    Left (next, Nothing) -> core sock next RecvClientHello (unsafeCoerce 0) 
     Left (next, Just (ExistT e a)) ->
       case e of
         RecvClientHello -> do
           putStrLn "receive"
           ch <- recvClientHello sock
-          core sock next RecvClientHello ms (unsafeCoerce ch) 
+          core sock next RecvClientHello (unsafeCoerce ch) 
         RecvFinished -> do
           fin <- recvFinished sock (unsafeCoerce a)
-          core sock next RecvFinished ms (unsafeCoerce fin)
+          core sock next RecvFinished (unsafeCoerce fin)
         RecvCCS -> do
           recvCCS sock
-          core sock next RecvCCS ms (unsafeCoerce ())
+          core sock next RecvCCS (unsafeCoerce ())
+        RecvAppData -> do
+          dat <- recvAppData sock (unsafeCoerce a)
+          print dat
+          putStrLn ""
+          core sock next RecvAppData (unsafeCoerce dat)
         GetRandomBytes -> do
           v <- (getRandomBytes (unsafeCoerce a) :: IO B.ByteString)
-          core sock next GetRandomBytes ms (unsafeCoerce v)
+          core sock next GetRandomBytes (unsafeCoerce v)
         SendPacket -> do
           putStrLn "send"
-          let (pkt,m) = unsafeCoerce a :: (I.Packet13, Maybe ((TLS.Hash,TLS.Cipher),B.ByteString))
+          let (pkt,m) = unsafeCoerce a :: (I.Packet13, Maybe (((TLS.Hash,TLS.Cipher),B.ByteString), Int))
           let encoded =
                 case pkt of
                   I.Handshake13 [hs] -> I.encodeHandshake13 hs
                   I.ChangeCipherSpec13 -> I.encodeChangeCipherSpec
-          bs <- encodePacket13 (pkt,m) ms
+          bs <- encodePacket13 (pkt,m) 
           print pkt
           putStrLn ""
           case bs of
             Right b -> do
               SB.sendAll sock b
-              core sock next SendPacket ms (unsafeCoerce encoded)
-        GenKeys ->
-          genKeys >>= core sock next GenKeys ms . unsafeCoerce 
+              core sock next SendPacket (unsafeCoerce encoded)
         GroupGetPubShared ->
-          I.groupGetPubShared (unsafeCoerce a) >>= core sock next GroupGetPubShared ms . unsafeCoerce
+          I.groupGetPubShared (unsafeCoerce a) >>= core sock next GroupGetPubShared . unsafeCoerce
+        MakeCertVerify ->
+          makeCertVerify (unsafeCoerce a) >>= core sock next MakeCertVerify . unsafeCoerce
 
 recvBytes :: Socket -> Int -> IO B.ByteString
 recvBytes sock n = B.concat <$> loop n
@@ -103,6 +102,16 @@ recvFinished sock m = do
       return dat
     Left e -> do
       print e
+      return ""
+
+recvAppData :: Socket -> Maybe ((TLS.Hash, TLS.Cipher), B.ByteString) -> IO B.ByteString
+recvAppData sock m = do
+  ehss <- recvRecord sock m
+  case ehss of
+    Right (I.Record ProtocolType_AppData _ dat) ->
+      return (I.fragmentGetBytes dat)
+    x -> do
+      print x
       return ""
 
 recvCCS :: Socket -> IO ()

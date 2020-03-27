@@ -7,20 +7,19 @@ import qualified Data.ByteString as B
 import Data.Word
 import Data.IORef
 
-encodePacket13 :: (Packet13, Maybe ((Hash,Cipher),B.ByteString)) -> IORef Word64 -> IO (Either TLSError B.ByteString)
-encodePacket13 (pkt,encrypt) ms = do
+encodePacket13 :: (Packet13, Maybe (((Hash,Cipher),B.ByteString), Int)) -> IO (Either TLSError B.ByteString)
+encodePacket13 (pkt,encrypt) = do
     let pt = contentType pkt
         mkRecord bs = Record pt TLS12 (fragmentPlaintext bs)
         records = map mkRecord $ packetToFragments 16384 pkt
-    fmap B.concat <$> forEitherM records (encodeRecord encrypt ms)
+    fmap B.concat <$> forEitherM records (encodeRecord encrypt)
 
-prepareRecord :: Maybe ((Hash,Cipher),B.ByteString) -> IORef Word64 -> RecordM a -> IO (Either TLSError a)
-prepareRecord encrypt ms rm = do
+prepareRecord :: Maybe (((Hash,Cipher),B.ByteString), Int) -> RecordM a -> IO (Either TLSError a)
+prepareRecord encrypt rm = do
   rst <-
         case encrypt of
           Nothing -> return newRecordState
-          Just ((h,cipher),secret) -> do
-            m <- readIORef ms
+          Just (((h,cipher),secret), ms) -> do
             let bulk    = cipherBulk cipher
                 keySize = bulkKeySize bulk
                 ivSize  = max 8 (bulkIVSize bulk + bulkExplicitIV bulk)
@@ -33,20 +32,19 @@ prepareRecord encrypt ms rm = do
                   }
                 rst = RecordState {
                     stCryptState  = cst
-                  , stMacState    = MacState { msSequence = m }
+                  , stMacState    = MacState { msSequence = toEnum ms }
                   , stCipher      = Just cipher
                   , stCompression = nullCompression
                   }
             print rst
             putStrLn ""
-            modifyIORef ms (fromInteger 1+)
             return rst
   case runRecordM rm newRecordOptions rst of
     Left err -> return $ Left err
     Right (a,_) -> return $ Right a
 
-encodeRecord :: Maybe ((Hash,Cipher),B.ByteString) -> IORef Word64 -> Record Plaintext -> IO (Either TLSError B.ByteString)
-encodeRecord cipher ms = prepareRecord cipher ms . encodeRecordM
+encodeRecord :: Maybe (((Hash,Cipher),B.ByteString), Int) -> Record Plaintext -> IO (Either TLSError B.ByteString)
+encodeRecord cipher = prepareRecord cipher . encodeRecordM
 
 packetToFragments :: Int -> Packet13 -> [B.ByteString]
 packetToFragments len (Handshake13 hss)  =

@@ -18,13 +18,21 @@ import Certificate
 sniExt :: ExtensionRaw
 sniExt = ExtensionRaw extensionID_ServerName ""
 
-makeCertVerify :: RSA.PrivateKey -> B.ByteString -> Handshake13
-makeCertVerify priv bs = 
-  let params = PSS.defaultPSSParams A.SHA384
-  in
-  case PSS.signWithSalt (B.replicate (PSS.pssSaltLength params) 0)  Nothing params priv (makeTarget bs) of
-    Right signed ->
-      CertVerify13 (HashIntrinsic, SignatureRSApssRSAeSHA384) signed
+makeCertVerify :: (((PubKey,PrivKey), (HashAndSignatureAlgorithm)), B.ByteString) -> IO Handshake13
+makeCertVerify (((pub, priv), (h,sig)), msg) = do
+  let params = signatureParams pub (Just (h,sig))
+  r <- kxSign priv pub params (makeTarget msg)
+  case r of
+    Left err -> error ("sign faild: " ++ show err)
+    Right signed -> return $ CertVerify13 (h,sig) signed
+
+--makeCertVerify :: RSA.PrivateKey -> B.ByteString -> Handshake13
+--makeCertVerify priv bs = 
+--  let params = PSS.defaultPSSParams A.SHA384
+--  in
+--  case PSS.signWithSalt (B.replicate (PSS.pssSaltLength params) 0)  Nothing params priv (makeTarget bs) of
+--    Right signed ->
+--      CertVerify13 (HashIntrinsic, SignatureRSApssRSAeSHA384) signed
 
 makeTarget :: B.ByteString -> B.ByteString
 makeTarget hashValue = runPut $ do
