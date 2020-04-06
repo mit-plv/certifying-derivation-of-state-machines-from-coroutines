@@ -11,12 +11,13 @@ encodePacket13 :: (Packet13, Maybe (((Hash,Cipher),B.ByteString), Int)) -> IO (E
 encodePacket13 (pkt,encrypt) = do
     let pt = contentType pkt
         mkRecord bs = Record pt TLS12 (fragmentPlaintext bs)
+        frags = packetToFragments 16384 pkt
         records = map mkRecord $ packetToFragments 16384 pkt
     fmap B.concat <$> forEitherM records (encodeRecord encrypt)
 
 prepareRecord :: Maybe (((Hash,Cipher),B.ByteString), Int) -> RecordM a -> IO (Either TLSError a)
 prepareRecord encrypt rm = do
-  rst <-
+  rst' <-
         case encrypt of
           Nothing -> return newRecordState
           Just (((h,cipher),secret), ms) -> do
@@ -39,7 +40,7 @@ prepareRecord encrypt rm = do
             print rst
             putStrLn ""
             return rst
-  case runRecordM rm newRecordOptions rst of
+  case runRecordM rm newRecordOptions rst' of
     Left err -> return $ Left err
     Right (a,_) -> return $ Right a
 

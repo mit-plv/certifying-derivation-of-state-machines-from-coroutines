@@ -3,6 +3,7 @@
 
 module TLS where
 
+import qualified Prelude
 import qualified Network.TLS as T
 import qualified Network.TLS.Internal as I
 import qualified Data.ByteString as B
@@ -12,7 +13,6 @@ import qualified Data.X509 as X
 import qualified Crypto.PubKey.RSA as RSA
 import qualified Data.Char
 import qualified Data.Word8
-import qualified Prelude
 
 #ifdef __GLASGOW_HASKELL__
 import qualified GHC.Base
@@ -266,9 +266,6 @@ certificate13 = I.Certificate13
 empty :: ByteString
 empty = B.empty
 
-ciphersuite_default :: ([]) Cipher
-ciphersuite_default = I.ciphersuite_default
-
 hashWith :: Hash -> (([]) ByteString) -> ByteString
 hashWith = Helper.hashWith
 
@@ -320,13 +317,16 @@ inb :: (a1 -> a1 -> GHC.Base.Bool) -> a1 -> (([]) a1) -> GHC.Base.Bool
 inb eqbA x l =
   case l of {
    [] -> GHC.Base.False;
-   (:) y _ -> eqbA x y}
+   (:) y l' ->
+    case eqbA x y of {
+     GHC.Base.True -> GHC.Base.True;
+     GHC.Base.False -> inb eqbA x l'}}
 
 chooseCipher :: (([]) CipherID) -> (([]) Cipher) -> GHC.Base.Maybe Cipher
-chooseCipher clientCipherIDs serverCiphers =
+chooseCipher clientCipherIDs serverCiphers0 =
   hd_error
     (filter (\cipher -> inb cipherID_beq (cipherID cipher) clientCipherIDs)
-      serverCiphers)
+      serverCiphers0)
 
 makeVerifyData :: Hash -> ByteString -> ByteString -> ByteString
 makeVerifyData h key transcript =
@@ -368,6 +368,16 @@ decideCredInfo priv certs hashSigs =
     case decideCredInfo' priv hashSig certs of {
      GHC.Base.Just res -> GHC.Base.Just res;
      GHC.Base.Nothing -> decideCredInfo priv certs rest}}
+
+lF :: Prelude.String
+lF =
+  (:) '\n' ([])
+
+mconcat :: (([]) ByteString) -> ByteString
+mconcat = B.concat
+
+serverCiphers :: ([]) Cipher
+serverCiphers = I.ciphersuite_13
 
 doHandshake_step :: (Prelude.Either ((,) ((,) () CertificateChain) PrivateKey)
                     (Prelude.Either ((,) ((,) () CertificateChain) PrivateKey)
@@ -466,10 +476,23 @@ doHandshake_step :: (Prelude.Either ((,) ((,) () CertificateChain) PrivateKey)
                     ((,)
                     ((,)
                     ((,)
+                    ((,)
                     ((,) ((,) ((,) () ((,) ClientHelloMsg ByteString)) Cipher)
                     ((,) GroupPublic GroupKey)) ByteString) ByteString) ByteString)
-                    ByteString) ByteString) (GHC.Base.Maybe ()))))))))))))))) ->
-                    Eff_tls -> Rets_tls -> Prelude.Either
+                    ByteString) ByteString) GHC.Base.Int)
+                    (Prelude.Either
+                    ((,)
+                    ((,)
+                    ((,)
+                    ((,)
+                    ((,)
+                    ((,)
+                    ((,)
+                    ((,) ((,) ((,) () ((,) ClientHelloMsg ByteString)) Cipher)
+                    ((,) GroupPublic GroupKey)) ByteString) ByteString) ByteString)
+                    ByteString) ByteString) GHC.Base.Int) ByteString)
+                    (GHC.Base.Maybe Prelude.String)))))))))))))))) -> Eff_tls ->
+                    Rets_tls -> Prelude.Either
                     ((,)
                     (Prelude.Either ((,) ((,) () CertificateChain) PrivateKey)
                     (Prelude.Either ((,) ((,) () CertificateChain) PrivateKey)
@@ -568,10 +591,24 @@ doHandshake_step :: (Prelude.Either ((,) ((,) () CertificateChain) PrivateKey)
                     ((,)
                     ((,)
                     ((,)
+                    ((,)
                     ((,) ((,) ((,) () ((,) ClientHelloMsg ByteString)) Cipher)
                     ((,) GroupPublic GroupKey)) ByteString) ByteString) ByteString)
-                    ByteString) ByteString) (GHC.Base.Maybe ())))))))))))))))
-                    (GHC.Base.Maybe (SigT Eff_tls Args_tls))) (GHC.Base.Maybe ())
+                    ByteString) ByteString) GHC.Base.Int)
+                    (Prelude.Either
+                    ((,)
+                    ((,)
+                    ((,)
+                    ((,)
+                    ((,)
+                    ((,)
+                    ((,)
+                    ((,) ((,) ((,) () ((,) ClientHelloMsg ByteString)) Cipher)
+                    ((,) GroupPublic GroupKey)) ByteString) ByteString) ByteString)
+                    ByteString) ByteString) GHC.Base.Int) ByteString)
+                    (GHC.Base.Maybe Prelude.String))))))))))))))))
+                    (GHC.Base.Maybe (SigT Eff_tls Args_tls)))
+                    (GHC.Base.Maybe Prelude.String)
 doHandshake_step =
   sum_merge
     (prod_curry
@@ -582,8 +619,7 @@ doHandshake_step =
       (prod_curry
         (prod_curry (\_ c p ->
           lift_tls RecvClientHello (\r -> Prelude.Left ((,)
-            (case chooseCipher (chCiphers (fst (unsafeCoerce r)))
-                    ciphersuite_default of {
+            (case chooseCipher (chCiphers (fst (unsafeCoerce r))) serverCiphers of {
               GHC.Base.Just a ->
                case extension_KeyShare (chExtension (fst (unsafeCoerce r))) of {
                 GHC.Base.Just a0 ->
@@ -593,28 +629,36 @@ doHandshake_step =
                     Prelude.Left _ -> Prelude.Right (Prelude.Right (Prelude.Right
                      (Prelude.Right (Prelude.Right (Prelude.Right (Prelude.Right
                      (Prelude.Right (Prelude.Right (Prelude.Right (Prelude.Right
-                     (Prelude.Right (Prelude.Right (Prelude.Right
-                     GHC.Base.Nothing)))))))))))));
+                     (Prelude.Right (Prelude.Right (Prelude.Right (Prelude.Right
+                     (GHC.Base.Just ((:) 'n' ((:) 'o' ((:) ' ' ((:) 'g' ((:) 'r'
+                     ((:) 'o' ((:) 'u' ((:) 'p' ([]))))))))))))))))))))))));
                     Prelude.Right b -> Prelude.Right (Prelude.Right (Prelude.Left
                      ((,) ((,) ((,) ((,) ((,) ((,) () c) p) (unsafeCoerce r)) a) a1)
                      b)))};
                   GHC.Base.Nothing -> Prelude.Right (Prelude.Right (Prelude.Right
                    (Prelude.Right (Prelude.Right (Prelude.Right (Prelude.Right
                    (Prelude.Right (Prelude.Right (Prelude.Right (Prelude.Right
-                   (Prelude.Right (Prelude.Right (Prelude.Right
-                   GHC.Base.Nothing)))))))))))))};
+                   (Prelude.Right (Prelude.Right (Prelude.Right (Prelude.Right
+                   (GHC.Base.Just ((:) 'n' ((:) 'o' ((:) ' ' ((:) 'k' ((:) 'e' ((:)
+                   'y' ((:) 's' ((:) 'h' ((:) 'a' ((:) 'r' ((:) 'e' ((:) ' ' ((:)
+                   'a' ((:) 'v' ((:) 'a' ((:) 'i' ((:) 'l' ((:) 'a' ((:) 'b' ((:)
+                   'l' ((:) 'e' ([])))))))))))))))))))))))))))))))))))))};
                 GHC.Base.Nothing -> Prelude.Right (Prelude.Right (Prelude.Right
                  (Prelude.Right (Prelude.Right (Prelude.Right (Prelude.Right
                  (Prelude.Right (Prelude.Right (Prelude.Right (Prelude.Right
-                 (Prelude.Right (Prelude.Right (Prelude.Right
-                 GHC.Base.Nothing)))))))))))))};
+                 (Prelude.Right (Prelude.Right (Prelude.Right (Prelude.Right
+                 (GHC.Base.Just ((:) 'n' ((:) 'o' ((:) ' ' ((:) 'k' ((:) 'e' ((:)
+                 'y' ((:) 's' ((:) 'h' ((:) 'a' ((:) 'r' ((:) 'e'
+                 ([])))))))))))))))))))))))))))};
               GHC.Base.Nothing -> Prelude.Right (Prelude.Right (Prelude.Right
                (Prelude.Right (Prelude.Right (Prelude.Right (Prelude.Right
                (Prelude.Right (Prelude.Right (Prelude.Right (Prelude.Right
-               (Prelude.Right (Prelude.Right (Prelude.Right
-               GHC.Base.Nothing)))))))))))))})
-            (case chooseCipher (chCiphers (fst (unsafeCoerce r)))
-                    ciphersuite_default of {
+               (Prelude.Right (Prelude.Right (Prelude.Right (Prelude.Right
+               (GHC.Base.Just ((:) 'n' ((:) 'o' ((:) ' ' ((:) 'c' ((:) 'i' ((:) 'p'
+               ((:) 'h' ((:) 'e' ((:) 'r' ((:) ' ' ((:) 'a' ((:) 'v' ((:) 'a' ((:)
+               'i' ((:) 'l' ((:) 'a' ((:) 'b' ((:) 'l' ((:) 'e'
+               ([])))))))))))))))))))))))))))))))))))})
+            (case chooseCipher (chCiphers (fst (unsafeCoerce r))) serverCiphers of {
               GHC.Base.Just _ ->
                case extension_KeyShare (chExtension (fst (unsafeCoerce r))) of {
                 GHC.Base.Just a ->
@@ -643,7 +687,12 @@ doHandshake_step =
                          (Prelude.Right (Prelude.Right (Prelude.Right (Prelude.Right
                          (Prelude.Right (Prelude.Right (Prelude.Right (Prelude.Right
                          (Prelude.Right (Prelude.Right (Prelude.Right (Prelude.Right
-                         GHC.Base.Nothing)))))))))))))})
+                         (Prelude.Right (GHC.Base.Just ((:) 'g' ((:) 'e' ((:) 'n'
+                         ((:) 'e' ((:) 'r' ((:) 'a' ((:) 't' ((:) 'i' ((:) 'n' ((:)
+                         'g' ((:) ' ' ((:) 'E' ((:) 'C' ((:) 'D' ((:) 'H' ((:) 'E'
+                         ((:) ' ' ((:) 'p' ((:) 'a' ((:) 'i' ((:) 'r' ((:) ' ' ((:)
+                         'f' ((:) 'a' ((:) 'i' ((:) 'l' ((:) 'e' ((:) 'd'
+                         ([]))))))))))))))))))))))))))))))))))))))))))))})
                       (case unsafeCoerce r0 of {
                         GHC.Base.Just _ -> GHC.Base.Just (ExistT GetRandomBytes
                          (unsafeCoerce ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
@@ -750,7 +799,7 @@ doHandshake_step =
                                  (Prelude.Right (Prelude.Right (Prelude.Right
                                  (Prelude.Right (Prelude.Right (Prelude.Right
                                  (Prelude.Right (Prelude.Right (Prelude.Right
-                                 GHC.Base.Nothing)))))))))))))})
+                                 (Prelude.Right GHC.Base.Nothing))))))))))))))})
                               (case decideCredInfo p (getCertificates c)
                                       (extension_SignatureAlgorithms
                                         (chExtension (fst r))) of {
@@ -1047,8 +1096,11 @@ doHandshake_step =
                                                  (Prelude.Right (Prelude.Right
                                                  (Prelude.Right (Prelude.Right
                                                  (Prelude.Left ((,) ((,) ((,) ((,)
-                                                 ((,) ((,) ((,) ((,) () r) c) p) r0)
-                                                 r1) r2) r3) r4))))))))))))));
+                                                 ((,) ((,) ((,) ((,) ((,) () r) c)
+                                                 p) r0) r1) r2) r3) r4)
+                                                 ((Prelude.+) 1 ((Prelude.+) 1
+                                                 ((Prelude.+) 1 ((Prelude.+) 1
+                                                 0))))))))))))))))));
                                                 GHC.Base.False -> Prelude.Right
                                                  (Prelude.Right (Prelude.Right
                                                  (Prelude.Right (Prelude.Right
@@ -1056,8 +1108,8 @@ doHandshake_step =
                                                  (Prelude.Right (Prelude.Right
                                                  (Prelude.Right (Prelude.Right
                                                  (Prelude.Right (Prelude.Right
-                                                 (Prelude.Right
-                                                 GHC.Base.Nothing)))))))))))))})
+                                                 (Prelude.Right (Prelude.Right
+                                                 GHC.Base.Nothing))))))))))))))})
                                               (case byteString_beq (unsafeCoerce r5)
                                                       (makeVerifyData (cipherHash c)
                                                         (hkdfExpandLabel
@@ -1103,13 +1155,9 @@ doHandshake_step =
                                                           r1 ((:) r2 ((:) r3 ((:) r4
                                                           [])))))))) of {
                                                 GHC.Base.True -> GHC.Base.Just
-                                                 (ExistT SendPacket
-                                                 (unsafeCoerce ((,)
-                                                   (appData13
-                                                     (s2b ((:) 'h' ((:) 'e' ((:) 'l'
-                                                       ((:) 'l' ((:) 'o' ((:) ' '
-                                                       ([]))))))))) (GHC.Base.Just
-                                                   ((,) ((,) ((,) (cipherHash c) c)
+                                                 (ExistT RecvAppData
+                                                 (unsafeCoerce (GHC.Base.Just ((,)
+                                                   ((,) (cipherHash c) c)
                                                    (hkdfExpandLabel (cipherHash c)
                                                      (hkdfExtract (cipherHash c)
                                                        (hkdfExpandLabel
@@ -1148,7 +1196,7 @@ doHandshake_step =
                                                        (b_replicate
                                                          (hashDigestSize
                                                            (cipherHash c)) w0))
-                                                     (s2b ((:) 's' ((:) ' ' ((:) 'a'
+                                                     (s2b ((:) 'c' ((:) ' ' ((:) 'a'
                                                        ((:) 'p' ((:) ' ' ((:) 't'
                                                        ((:) 'r' ((:) 'a' ((:) 'f'
                                                        ((:) 'f' ((:) 'i' ((:) 'c'
@@ -1156,8 +1204,7 @@ doHandshake_step =
                                                      (hashWith (cipherHash c) ((:)
                                                        (snd r) ((:) r0 ((:) r1 ((:)
                                                        r2 ((:) r3 ((:) r4 [])))))))
-                                                     (hashDigestSize (cipherHash c))))
-                                                   0)))));
+                                                     (hashDigestSize (cipherHash c)))))));
                                                 GHC.Base.False -> GHC.Base.Nothing}))))))))))))
                             (sum_merge
                               (prod_curry
@@ -1167,16 +1214,2228 @@ doHandshake_step =
                                       (prod_curry
                                         (prod_curry
                                           (prod_curry
-                                            (prod_curry (\_ _ _ _ _ _ _ _ _ ->
-                                              lift_tls SendPacket (\_ ->
-                                                Prelude.Left ((,) (Prelude.Right
-                                                (Prelude.Right (Prelude.Right
-                                                (Prelude.Right (Prelude.Right
-                                                (Prelude.Right (Prelude.Right
-                                                (Prelude.Right (Prelude.Right
-                                                (Prelude.Right (Prelude.Right
-                                                (Prelude.Right (Prelude.Right
-                                                (Prelude.Right (GHC.Base.Just
-                                                ()))))))))))))))) GHC.Base.Nothing)))))))))))
-                              (\o _ _ -> Prelude.Right o))))))))))))))
+                                            (prod_curry
+                                              (prod_curry
+                                                (\_ r c p r0 r1 r2 r3 r4 n ->
+                                                lift_tls RecvAppData (\r5 ->
+                                                  Prelude.Left ((,) (Prelude.Right
+                                                  (Prelude.Right (Prelude.Right
+                                                  (Prelude.Right (Prelude.Right
+                                                  (Prelude.Right (Prelude.Right
+                                                  (Prelude.Right (Prelude.Right
+                                                  (Prelude.Right (Prelude.Right
+                                                  (Prelude.Right (Prelude.Right
+                                                  (Prelude.Right (Prelude.Left ((,)
+                                                  ((,) ((,) ((,) ((,) ((,) ((,) ((,)
+                                                  ((,) ((,) () r) c) p) r0) r1) r2)
+                                                  r3) r4) n)
+                                                  (unsafeCoerce r5)))))))))))))))))
+                                                  (GHC.Base.Just (ExistT SendPacket
+                                                  (unsafeCoerce ((,)
+                                                    (appData13
+                                                      (mconcat ((:)
+                                                        (s2b ((:) 'H' ((:) 'T' ((:)
+                                                          'T' ((:) 'P' ((:) '/' ((:)
+                                                          '1' ((:) '.' ((:) '1' ((:)
+                                                          ' ' ((:) '2' ((:) '0' ((:)
+                                                          '0' ((:) ' ' ((:) 'O' ((:)
+                                                          'K' ((:) '\r' ((:) '\n'
+                                                          ((:) 'C' ((:) 'o' ((:) 'n'
+                                                          ((:) 't' ((:) 'e' ((:) 'n'
+                                                          ((:) 't' ((:) '-' ((:) 'T'
+                                                          ((:) 'y' ((:) 'p' ((:) 'e'
+                                                          ((:) ':' ((:) ' ' ((:) 't'
+                                                          ((:) 'e' ((:) 'x' ((:) 't'
+                                                          ((:) '/' ((:) 'p' ((:) 'l'
+                                                          ((:) 'a' ((:) 'i' ((:) 'n'
+                                                          ((:) '\r' ((:) '\n' ((:)
+                                                          '\r' ((:) '\n' ((:) 'H'
+                                                          ((:) 'e' ((:) 'l' ((:) 'l'
+                                                          ((:) 'o' ((:) ',' ((:) ' '
+                                                          ([]))))))))))))))))))))))))))))))))))))))))))))))))))))))
+                                                        ((:) (unsafeCoerce r5) ((:)
+                                                        (s2b ((:) '!' ((:) '\r'
+                                                          lF))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([])))) ((:)
+                                                        (s2b ((:) '.' ((:) '.'
+                                                          ([]))))
+                                                        [])))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))
+                                                    (GHC.Base.Just ((,) ((,) ((,)
+                                                    (cipherHash c) c)
+                                                    (hkdfExpandLabel (cipherHash c)
+                                                      (hkdfExtract (cipherHash c)
+                                                        (hkdfExpandLabel
+                                                          (cipherHash c)
+                                                          (hkdfExtract
+                                                            (cipherHash c)
+                                                            (hkdfExpandLabel
+                                                              (cipherHash c)
+                                                              (hkdfExtract
+                                                                (cipherHash c)
+                                                                (b_replicate
+                                                                  (hashDigestSize
+                                                                    (cipherHash c))
+                                                                  w0)
+                                                                (b_replicate
+                                                                  (hashDigestSize
+                                                                    (cipherHash c))
+                                                                  w0))
+                                                              (s2b ((:) 'd' ((:) 'e'
+                                                                ((:) 'r' ((:) 'i'
+                                                                ((:) 'v' ((:) 'e'
+                                                                ((:) 'd'
+                                                                ([])))))))))
+                                                              (hashWith
+                                                                (cipherHash c) ((:)
+                                                                (s2b ([])) []))
+                                                              (hashDigestSize
+                                                                (cipherHash c)))
+                                                            (ba_convert (snd p)))
+                                                          (s2b ((:) 'd' ((:) 'e'
+                                                            ((:) 'r' ((:) 'i' ((:)
+                                                            'v' ((:) 'e' ((:) 'd'
+                                                            ([])))))))))
+                                                          (hashWith (cipherHash c)
+                                                            ((:) (s2b ([])) []))
+                                                          (hashDigestSize
+                                                            (cipherHash c)))
+                                                        (b_replicate
+                                                          (hashDigestSize
+                                                            (cipherHash c)) w0))
+                                                      (s2b ((:) 's' ((:) ' ' ((:)
+                                                        'a' ((:) 'p' ((:) ' ' ((:)
+                                                        't' ((:) 'r' ((:) 'a' ((:)
+                                                        'f' ((:) 'f' ((:) 'i' ((:)
+                                                        'c' ([]))))))))))))))
+                                                      (hashWith (cipherHash c) ((:)
+                                                        (snd r) ((:) r0 ((:) r1 ((:)
+                                                        r2 ((:) r3 ((:) r4 [])))))))
+                                                      (hashDigestSize
+                                                        (cipherHash c)))) 0))))))))))))))))))
+                              (sum_merge
+                                (prod_curry
+                                  (prod_curry
+                                    (prod_curry
+                                      (prod_curry
+                                        (prod_curry
+                                          (prod_curry
+                                            (prod_curry
+                                              (prod_curry
+                                                (prod_curry
+                                                  (prod_curry
+                                                    (\_ r c p r0 r1 r2 r3 r4 n _ ->
+                                                    lift_tls SendPacket (\_ ->
+                                                      Prelude.Left ((,)
+                                                      ((\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
+                                                         (\_ -> Prelude.Right
+                                                         (Prelude.Right
+                                                         (Prelude.Right
+                                                         (Prelude.Right
+                                                         (Prelude.Right
+                                                         (Prelude.Right
+                                                         (Prelude.Right
+                                                         (Prelude.Right
+                                                         (Prelude.Right
+                                                         (Prelude.Right
+                                                         (Prelude.Right
+                                                         (Prelude.Right
+                                                         (Prelude.Right
+                                                         (Prelude.Right
+                                                         (Prelude.Right
+                                                         (GHC.Base.Just ((:) 's'
+                                                         ((:) 'u' ((:) 'c' ((:) 'c'
+                                                         ((:) 'e' ((:) 's' ((:) 's'
+                                                         ([]))))))))))))))))))))))))
+                                                         (\n0' -> Prelude.Right
+                                                         (Prelude.Right
+                                                         (Prelude.Right
+                                                         (Prelude.Right
+                                                         (Prelude.Right
+                                                         (Prelude.Right
+                                                         (Prelude.Right
+                                                         (Prelude.Right
+                                                         (Prelude.Right
+                                                         (Prelude.Right
+                                                         (Prelude.Right
+                                                         (Prelude.Right
+                                                         (Prelude.Right
+                                                         (Prelude.Left ((,) ((,)
+                                                         ((,) ((,) ((,) ((,) ((,)
+                                                         ((,) ((,) () r) c) p) r0)
+                                                         r1) r2) r3) r4)
+                                                         n0')))))))))))))))
+                                                         n)
+                                                      ((\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
+                                                         (\_ ->
+                                                         GHC.Base.Nothing)
+                                                         (\_ -> GHC.Base.Just
+                                                         (ExistT RecvAppData
+                                                         (unsafeCoerce
+                                                           (GHC.Base.Just ((,) ((,)
+                                                           (cipherHash c) c)
+                                                           (hkdfExpandLabel
+                                                             (cipherHash c)
+                                                             (hkdfExtract
+                                                               (cipherHash c)
+                                                               (hkdfExpandLabel
+                                                                 (cipherHash c)
+                                                                 (hkdfExtract
+                                                                   (cipherHash c)
+                                                                   (hkdfExpandLabel
+                                                                     (cipherHash c)
+                                                                     (hkdfExtract
+                                                                       (cipherHash
+                                                                         c)
+                                                                       (b_replicate
+                                                                         (hashDigestSize
+                                                                           (cipherHash
+                                                                           c)) w0)
+                                                                       (b_replicate
+                                                                         (hashDigestSize
+                                                                           (cipherHash
+                                                                           c)) w0))
+                                                                     (s2b ((:) 'd'
+                                                                       ((:) 'e' ((:)
+                                                                       'r' ((:) 'i'
+                                                                       ((:) 'v' ((:)
+                                                                       'e' ((:) 'd'
+                                                                       ([])))))))))
+                                                                     (hashWith
+                                                                       (cipherHash
+                                                                         c) ((:)
+                                                                       (s2b ([]))
+                                                                       []))
+                                                                     (hashDigestSize
+                                                                       (cipherHash
+                                                                         c)))
+                                                                   (ba_convert
+                                                                     (snd p)))
+                                                                 (s2b ((:) 'd' ((:)
+                                                                   'e' ((:) 'r' ((:)
+                                                                   'i' ((:) 'v' ((:)
+                                                                   'e' ((:) 'd'
+                                                                   ([])))))))))
+                                                                 (hashWith
+                                                                   (cipherHash c)
+                                                                   ((:) (s2b ([]))
+                                                                   []))
+                                                                 (hashDigestSize
+                                                                   (cipherHash c)))
+                                                               (b_replicate
+                                                                 (hashDigestSize
+                                                                   (cipherHash c))
+                                                                 w0))
+                                                             (s2b ((:) 'c' ((:) ' '
+                                                               ((:) 'a' ((:) 'p'
+                                                               ((:) ' ' ((:) 't'
+                                                               ((:) 'r' ((:) 'a'
+                                                               ((:) 'f' ((:) 'f'
+                                                               ((:) 'i' ((:) 'c'
+                                                               ([]))))))))))))))
+                                                             (hashWith
+                                                               (cipherHash c) ((:)
+                                                               (snd r) ((:) r0 ((:)
+                                                               r1 ((:) r2 ((:) r3
+                                                               ((:) r4 [])))))))
+                                                             (hashDigestSize
+                                                               (cipherHash c))))))))
+                                                         n)))))))))))))) (\o _ _ ->
+                                Prelude.Right o)))))))))))))))
 

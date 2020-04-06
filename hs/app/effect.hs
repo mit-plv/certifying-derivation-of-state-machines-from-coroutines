@@ -1,6 +1,8 @@
 {-# LANGUAGE ScopedTypeVariables, OverloadedStrings #-}
 
 import System.Environment
+import Control.Monad
+import Control.Concurrent
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8 as C
 import Network.Socket
@@ -26,8 +28,11 @@ main = withSocketsDo $ do
       sock <- socket AF_INET Stream 0
       bind sock (SockAddrInet 8001 iNADDR_ANY)  
       listen sock 2
-      (s,_) <- accept sock
-      core s (Left (((), cert), priv)) RecvClientHello (unsafeCoerce 1) 
+      forever $ do
+        (s,a) <- accept sock
+        print a
+        putStrLn ""
+        forkFinally (core s (Left (((), cert), priv)) RecvClientHello (unsafeCoerce 1)) (const $ close s)
     Left s ->
       putStrLn s
 
@@ -36,7 +41,7 @@ core sock x ef (r::Any) = do
     Right res ->
       case res of
         Just x -> do
-          close sock
+          putStrLn x
         _ -> putStrLn "Done"
     Left (next, Nothing) -> core sock next RecvClientHello (unsafeCoerce 0) 
     Left (next, Just (ExistT e a)) ->
@@ -47,9 +52,11 @@ core sock x ef (r::Any) = do
           core sock next RecvClientHello (unsafeCoerce ch) 
         RecvFinished -> do
           fin <- recvFinished sock (unsafeCoerce a)
+          putStrLn "received Finished"
           core sock next RecvFinished (unsafeCoerce fin)
         RecvCCS -> do
           recvCCS sock
+          putStrLn "received CCS"
           core sock next RecvCCS (unsafeCoerce ())
         RecvAppData -> do
           dat <- recvAppData sock (unsafeCoerce a)
@@ -67,7 +74,7 @@ core sock x ef (r::Any) = do
                   I.Handshake13 [hs] -> I.encodeHandshake13 hs
                   I.ChangeCipherSpec13 -> I.encodeChangeCipherSpec
           bs <- encodePacket13 (pkt,m) 
-          print pkt
+          print pkt 
           putStrLn ""
           case bs of
             Right b -> do
@@ -128,6 +135,7 @@ recvHandshakes sock m = do
     Left err -> return $ Left err
     Right (I.Record ProtocolType_Handshake ver fragment) ->
         return $ I.decodeHandshakes13 $ I.fragmentGetBytes fragment
+    Right p -> print p >> return (Right [])
 
 
 recvRecord :: Socket -> Maybe ((TLS.Hash,TLS.Cipher), B.ByteString) -> IO (Either TLSError (I.Record I.Plaintext))
