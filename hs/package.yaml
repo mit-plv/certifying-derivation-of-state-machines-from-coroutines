@@ -35,6 +35,7 @@ dependencies:
 - tasty-quickcheck
 - tls >= 1.5.2
 - memory
+- mtl
 
 library:
   source-dirs: src

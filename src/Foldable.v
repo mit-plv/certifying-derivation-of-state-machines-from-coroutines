@@ -41,6 +41,16 @@ Definition nth_err A F `{F_Foldable : Foldable F}(x : F A) :=
            end)
         (fun _ => None) x.
 
+Fixpoint replace_list (A:Set) n a (l : list A):=
+  match l with
+  | [] => []
+  | x::l' =>
+    match n with
+    | O => a::l'
+    | S n' => x :: replace_list n' a l'
+    end
+  end.
+
 Definition GenForall2 (A1 A2:Set) (F: Set -> Set) `{F_Foldable : Foldable F}
            (R : A1 -> A2 -> Prop) (x1 : F A1) (x2 : F A2) :=
   exists x, zip _ _ x1 x2 = Some x /\ fold_right (fun '(a1, a2) (p:Prop) => R a1 a2 /\ p) True (to_list _ x).
@@ -60,6 +70,7 @@ Proof.
   simpl.
   auto.
 Qed.
+  
 
 Lemma nth_err_nth_error : forall (A:Set) F (F_Foldable : Foldable F) (x : F A) n,
     nth_err _ x n = nth_error (to_list _ x) n.
@@ -146,6 +157,18 @@ Proof.
   congruence.
 Qed.
 
+Lemma Forall2_GenForall2 : forall (A1 A2:Set) R (x1 : list A1) (x2 : list A2),
+     Forall2 R x1 x2 -> GenForall2 R x1 x2.
+Proof.
+  intros.
+  unfold GenForall2. simpl.
+  induction H; simpl.
+  exists []. simpl. auto.
+  destruct IHForall2 as (l1,(H1,H2)).
+  exists ((x,y)::l1); simpl.
+  rewrite H1. simpl. auto.
+Qed.
+  
 Lemma GenForall2_size : forall (A1 A2 : Set) (F : Set -> Set) (F_Foldable : Foldable F) R (x1 : F A1) (x2 : F A2),
     GenForall2 R x1 x2 ->
     size _ x1 = size _ x2.
@@ -241,7 +264,25 @@ Proof.
   auto.
 Qed.
 
-Hint Resolve GenForall2_size nth_err_None nth_err_Some GenForall2_cons GenForall2_nth_None_Some GenForall2_nth_Some_None : foldable.
+Lemma GenForall2_replace_list : forall (A1 A2:Set)(R : A1 -> A2 -> Prop)
+                                       n a1 a2 l1 l2,
+    R a1 a2 ->
+    GenForall2 R l1 l2 ->
+    GenForall2 R (replace_list n a1 l1) (replace_list n a2 l2).
+Proof.
+  intros.
+  apply GenForall2_Forall2 in H0.
+  apply Forall2_GenForall2.
+  unfold to_list in *. simpl in *.
+  revert n.
+  induction H0; intros.
+  destruct n; simpl; auto.
+  destruct n; simpl.
+  econstructor; auto.
+  econstructor; auto.
+Qed.
+  
+Hint Resolve GenForall2_size nth_err_None nth_err_Some GenForall2_cons GenForall2_nth_None_Some GenForall2_nth_Some_None GenForall2_replace_list : foldable.
 
 
 Inductive Map A := Node : String.string * A -> Map A -> Map A -> Map A | Leaf.

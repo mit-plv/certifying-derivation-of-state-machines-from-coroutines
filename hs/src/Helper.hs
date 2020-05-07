@@ -14,6 +14,7 @@ import qualified Crypto.PubKey.RSA.PSS as PSS
 import qualified Crypto.Hash.Algorithms as A
 import qualified Crypto.Hash as H
 import Certificate
+import Encrypt (newRecordOptions)
 
 sniExt :: ExtensionRaw
 sniExt = ExtensionRaw extensionID_ServerName ""
@@ -52,41 +53,7 @@ hashWith SHA512 bss = B.convert $ H.hashFinalize $ H.hashUpdates (H.hashInit :: 
 extensionLookup :: ExtensionID -> [ExtensionRaw] -> Maybe B.ByteString
 extensionLookup toFind = fmap (\(ExtensionRaw _ content) -> content)
                        . find (\(ExtensionRaw eid _) -> eid == toFind)
-{-
-extensionID_NegotiatedGroups :: ExtensionID
-extensionID_NegotiatedGroups                    = 0xa -- RFC4492bis and TLS 1.3
-extensionID_KeyShare :: ExtensionID
-extensionID_KeyShare                            = 0x33 -- TLS 1.3
 
-
-decodeNegotiatedGroups :: B.ByteString -> Maybe [Group]
-decodeNegotiatedGroups =
-    runGetMaybe (mapMaybe toEnumSafe16 <$> getWords16)
-
-data KeyShare =
-   Build_KeyShare Group B.ByteString
-   deriving (Show)
-
-kSgroup :: KeyShare -> Group
-kSgroup k =
-  case k of {
-   Build_KeyShare kSgroup0 _ -> kSgroup0}
-
-decodeKeyShare = runGetMaybe $ do
-    len <- fromIntegral <$> getWord16
-    grps <- getList len getKeyShare
-    return (catMaybes grps)
-
-getKeyShare :: Get (Int, Maybe KeyShare)
-getKeyShare = do
-    g <- getWord16
-    l <- fromIntegral <$> getWord16
-    key <- getBytes l
-    let !len = l + 4
-    case toEnumSafe16 g of
-      Nothing  -> return (len, Nothing)
-      Just grp -> return (len, Just (Build_KeyShare grp key))
--}
 supportedGroups' = [P256,P384,P521,X25519]
 
 serverGroups :: ([]) Group
@@ -94,3 +61,40 @@ serverGroups =
   supportedGroups'
 
 defaultCertChain pubKey = X.CertificateChain [simpleX509 $ PubKeyRSA pubKey]
+
+recordToPacket :: Record Plaintext -> Maybe Packet13
+recordToPacket (Record ProtocolType_ChangeCipherSpec _ _) = Just ChangeCipherSpec13
+recordToPacket (Record ProtocolType_AppData _ fragment) = Just $ AppData13 $ fragmentGetBytes fragment
+recordToPacket (Record ProtocolType_Handshake _ fragment) =
+  case decodeHandshakes13 $ fragmentGetBytes fragment of
+    Right a -> Just $ Handshake13 a
+    Left _ -> Nothing
+
+decodeRecord :: Header -> Maybe ((Hash, Cipher), B.ByteString) -> B.ByteString -> Maybe Packet13
+decodeRecord header m msg =
+  let rst =
+        case m of
+          Nothing -> newRecordState
+          Just ((h,cipher),secret) ->
+            let bulk    = cipherBulk cipher
+                keySize = bulkKeySize bulk
+                ivSize  = max 8 (bulkIVSize bulk + bulkExplicitIV bulk)
+                key = hkdfExpandLabel h secret "key" "" keySize
+                iv  = hkdfExpandLabel h secret "iv"  "" ivSize
+                cst = CryptState {
+                    cstKey       = bulkInit bulk BulkDecrypt key
+                  , cstIV        = iv
+                  , cstMacSecret = secret
+                  }
+            in
+            RecordState {
+                  stCryptState  = cst
+                , stMacState    = MacState { msSequence = 0 }
+                , stCipher      = Just cipher
+                , stCompression = nullCompression
+                }
+  in
+  case runRecordM (decodeRecordM header msg) newRecordOptions rst of
+    Left _ -> Nothing
+    Right (a,_) -> recordToPacket a
+    

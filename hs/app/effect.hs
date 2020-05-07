@@ -3,6 +3,7 @@
 import System.Environment
 import Control.Monad
 import Control.Concurrent
+import Data.IORef
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8 as C
 import Network.Socket
@@ -23,67 +24,79 @@ main :: IO ()
 main = withSocketsDo $ do
   args <- getArgs
   ecred <- credentialLoadX509 (args !! 0) (args !! 1)
+  newAccepts <- newIORef []
+  received <- newEmptyMVar
   case ecred of
     Right (cert,priv) -> do
       sock <- socket AF_INET Stream 0
       bind sock (SockAddrInet 8001 iNADDR_ANY)  
       listen sock 2
+      forkIO (core [] (Left ((((),cert), priv), 1000)) NewAccept (unsafeCoerce ()) newAccepts received)
       forever $ do
         (s,a) <- accept sock
+        modifyIORef newAccepts ((s,show a):)
         print a
         putStrLn ""
-        forkFinally (core s (Left (((), cert), priv)) RecvClientHello (unsafeCoerce 1)) (const $ close s)
+--        forkFinally (core s (Left (((), cert), priv)) RecvClientHello (unsafeCoerce 1)) (const $ close s)
     Left s ->
       putStrLn s
 
-core sock x ef (r::Any) = do
-  case doHandshake_step x ef (unsafeCoerce r) of
-    Right res ->
-      case res of
-        Just x -> do
-          putStrLn x
-        _ -> putStrLn "Done"
-    Left (next, Nothing) -> core sock next RecvClientHello (unsafeCoerce 0) 
+core sock x ef (r::Any) newAccepts received = do
+  case main_loop_step x ef r of
+    Right res -> putStrLn "Done" >> forM_ sock (\(_,s) -> close s)
+    Left (next, Nothing) -> core sock next NewAccept (unsafeCoerce ()) newAccepts received
     Left (next, Just (ExistT e a)) ->
       case e of
-        RecvClientHello -> do
-          putStrLn "receive"
-          ch <- recvClientHello sock
-          core sock next RecvClientHello (unsafeCoerce ch) 
-        RecvFinished -> do
-          fin <- recvFinished sock (unsafeCoerce a)
-          putStrLn "received Finished"
-          core sock next RecvFinished (unsafeCoerce fin)
-        RecvCCS -> do
-          recvCCS sock
-          putStrLn "received CCS"
-          core sock next RecvCCS (unsafeCoerce ())
-        RecvAppData -> do
-          dat <- recvAppData sock (unsafeCoerce a)
-          print dat
-          putStrLn ""
-          core sock next RecvAppData (unsafeCoerce dat)
-        GetRandomBytes -> do
-          v <- (getRandomBytes (unsafeCoerce a) :: IO B.ByteString)
-          core sock next GetRandomBytes (unsafeCoerce v)
-        SendPacket -> do
-          putStrLn "send"
-          let (pkt,m) = unsafeCoerce a :: (I.Packet13, Maybe (((TLS.Hash,TLS.Cipher),B.ByteString), Int))
-          let encoded =
-                case pkt of
-                  I.Handshake13 [hs] -> I.encodeHandshake13 hs
-                  I.ChangeCipherSpec13 -> I.encodeChangeCipherSpec
-          bs <- encodePacket13 (pkt,m) 
-          print pkt 
-          putStrLn ""
-          case bs of
-            Right b -> do
-              SB.sendAll sock b
-              core sock next SendPacket (unsafeCoerce encoded)
-        GroupGetPubShared ->
-          I.groupGetPubShared (unsafeCoerce a) >>= core sock next GroupGetPubShared . unsafeCoerce
-        MakeCertVerify ->
-          makeCertVerify (unsafeCoerce a) >>= core sock next MakeCertVerify . unsafeCoerce
+        NewAccept -> do
+          l <- readIORef newAccepts
+          case l of
+            [] -> threadDelay 100000 >> core sock next NewAccept (unsafeCoerce Nothing) newAccepts received
+            (s,adr):l' -> do
+              writeIORef newAccepts l'
+              putStrLn $ "accepted" ++ show adr
+              core ((adr,s):sock) next NewAccept (unsafeCoerce (Just adr)) newAccepts received
+        Receive -> do
+          r <- tryTakeMVar received
+          case r of
+            Just (adr,p) ->
+              case p of
+                Left (Left Nothing) -> putStrLn $ "received NONE" ++ show adr
+                _ -> putStrLn $ "received " ++ show adr
+            _ -> return ()
+          core sock next Receive (unsafeCoerce r) newAccepts received
+        Perform -> do
+          let (adr,ea) = unsafeCoerce a :: (String, Args_tls')
+          putStrLn $ "perform " ++ show ea ++ show adr
+          case ea of
+            (Right a') -> do
+              putStrLn "RecvData"
+              let ms = lookup adr sock
+              case ms of
+                Just s -> do
+                  forkIO $ recvBytes s a' >>= \ch -> putMVar received (adr,Right ch)
+                  return ()
+                Nothing -> error "no socket"
+            (Left (Left (Left (Left a')))) ->
+              putStrLn "GetRandomBytes" >> getRandomBytes a' >>= \(v::B.ByteString) -> forkIO (putMVar received (adr,Right v)) >> return ()
+            (Left (Left (Left (Right a')))) ->
+              case lookup adr sock of
+                Just s -> do
+                  putStrLn "SendPacket"
+                  let (pkt,m) = a' :: (I.Packet13, Maybe (((TLS.Hash,TLS.Cipher),B.ByteString),Int))
+                  let encoded =
+                        case pkt of
+                          I.Handshake13 [hs] -> I.encodeHandshake13 hs
+                          I.ChangeCipherSpec13 -> I.encodeChangeCipherSpec
+                  bs <- encodePacket13 (pkt,m)
+                  case bs of
+                    Right b -> do
+                      forkIO $ SB.sendAll s b >> putMVar received (adr,Right encoded)
+                      return ()
+            (Left (Left (Right a'))) ->
+              I.groupGetPubShared a' >>= \p -> forkIO (putMVar received (adr,(Left (Left p)))) >> return ()
+            (Left (Right a')) ->
+              makeCertVerify a' >>= \c -> forkIO (putMVar received (adr,(Left $ Right c))) >> return ()
+          core sock next Perform (unsafeCoerce ()) newAccepts received
 
 recvBytes :: Socket -> Int -> IO B.ByteString
 recvBytes sock n = B.concat <$> loop n
@@ -94,12 +107,12 @@ recvBytes sock n = B.concat <$> loop n
             then return []
             else (r:) <$> loop (left - B.length r)
 
-recvClientHello sock = do
-  ehss <- recvHandshakes sock Nothing
-  case ehss of
-    Right [ch@(I.ClientHello13 ver cRandom session cipherIDs exts)] -> do
-      putStr $ show ch ++ "\n"
-      return (Build_ClientHelloMsg session exts cipherIDs, I.encodeHandshake13 ch)
+--recvClientHello sock = do
+--  ehss <- recvHandshakes sock Nothing
+--  case ehss of
+--    Right [ch@(I.ClientHello13 ver cRandom session cipherIDs exts)] -> do
+--      putStr $ show ch ++ "\n"
+--      return (Build_ClientHelloMsg session exts cipherIDs, I.encodeHandshake13 ch)
 
 recvFinished :: Socket -> Maybe ((TLS.Hash,TLS.Cipher), B.ByteString) -> IO B.ByteString
 recvFinished sock m = do
@@ -136,7 +149,6 @@ recvHandshakes sock m = do
     Right (I.Record ProtocolType_Handshake ver fragment) ->
         return $ I.decodeHandshakes13 $ I.fragmentGetBytes fragment
     Right p -> print p >> return (Right [])
-
 
 recvRecord :: Socket -> Maybe ((TLS.Hash,TLS.Cipher), B.ByteString) -> IO (Either TLSError (I.Record I.Plaintext))
 recvRecord sock m = recvBytes sock 5 >>= recvLengthE . I.decodeHeader

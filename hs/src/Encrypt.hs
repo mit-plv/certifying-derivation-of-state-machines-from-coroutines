@@ -40,6 +40,7 @@ prepareRecord encrypt rm = do
             print rst
             putStrLn ""
             return rst
+  putStrLn "foo"
   case runRecordM rm newRecordOptions rst' of
     Left err -> return $ Left err
     Right (a,_) -> return $ Right a

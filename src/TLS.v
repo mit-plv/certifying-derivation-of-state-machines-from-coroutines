@@ -9,26 +9,7 @@ Parameter ByteString : Set.
 
 Inductive Group := P256 | P384 | P521 | X25519.
 
-Inductive PskMode := pskModePlain | PskModeDHE.
-
-Inductive SignatureScheme :=
-  PKCS1WithSHA256
-| PKCS1WithSHA384
-| PKCS1WithSHA512
-| PSSWithSHA256
-| PSSWithSHA384
-| PSSWithSHA512
-| ECDSAWithP256AndSHA256
-| ECDSAWithP384AndSHA384
-| ECDSAWithP512AndSHA512
-| Ed25519
-| PKCS1WithSHA1
-| ECDSAWithSHA1.
-
 Scheme Equality for Group.
-Scheme Equality for PskMode.
-Scheme Equality for SignatureScheme.
-
 
 Record KeyShare :=
   { ksGroup : Group;
@@ -46,38 +27,6 @@ Record ClientHelloMsg :=
     chExtension : list ExtensionRaw;
     chCiphers : list CipherID
   }.
-
-Ltac nth_of_tuple' p n flag :=
-  lazymatch n with
-  | O =>
-    lazymatch flag with
-    | true => exact p
-    | false => exact (snd p)
-    end
-  | S ?n' => nth_of_tuple' (fst p) n' flag
-  end.
-
-Ltac nth_of_tuple p n :=
-  let ty := type of p in
-  let rec aux ty :=
-      lazymatch ty with
-      | ?ty' * _ => let v := aux ty' in constr:(S v)
-      | _ => O
-      end
-  in
-  let m := aux ty in
-  let n' := (eval simpl in (m - n)) in
-  lazymatch n with
-  | O => nth_of_tuple' p n' true
-  | _ => nth_of_tuple' p n' false
-  end.
-
-Notation "p ._( n )" :=
-  ltac:(nth_of_tuple p n)
-         (at level 0, only parsing).
-
-Parameter ServerParams : Set.
-Parameter Context : Set.
 
 Parameter serverGroups : list Group.
 
@@ -97,19 +46,23 @@ Definition intersect (xs ys : list Group) :=
 Parameter extension_KeyShare : list ExtensionRaw -> option (list KeyShare).
 Parameter extension_NegotiatedGroups : list ExtensionRaw -> list Group.
 Parameter word32 : Set.
-
-Inductive PskIdentity := Build_PskIdentity : ByteString -> word32 -> PskIdentity.
-
-Inductive PreSharedKey :=
-| PreSharedKeyClientHello : list PskIdentity -> list ByteString -> PreSharedKey
-| PreSharedKeyServerHello : nat -> PreSharedKey.
-
-Parameter extension_PreSharedKey : list ExtensionRaw -> option PreSharedKey.
 Parameter Handshake13 : Set.
 Parameter Packet13 : Set.
 Parameter PublicKey PrivateKey : Set.
 Parameter GroupPublic GroupKey : Set.
 Parameter Hash Cipher HashAndSignatureAlgorithm : Set.
+
+(*
+Inductive eff_tls :=
+| recvClientHello : eff_tls
+| recvFinished : option (Hash * Cipher * ByteString) -> eff_tls
+| recvCCS : eff_tls
+| recvAppData : option (Hash * Cipher * ByteString) -> eff_tls
+| getRandomBytes : nat -> eff_tls
+| sendPacket : Packet13 * option (Hash * Cipher * ByteString * nat) -> eff_tls
+| groupGetPubShared : GroupPublic -> eff_tls
+| makeCertVerify : PublicKey * PrivateKey * HashAndSignatureAlgorithm * ByteString -> eff_tls.
+*)
 
 Inductive eff_tls := recvClientHello | recvFinished | recvCCS | recvAppData | getRandomBytes | sendPacket | groupGetPubShared | makeCertVerify.
 
@@ -136,6 +89,62 @@ Definition rets_tls ef :=
   | groupGetPubShared => option (GroupPublic * GroupKey)
   | makeCertVerify => Handshake13
   end.
+
+Definition lift_tls_core A (adef: A)(e : eff_tls)(a : rets_tls e -> A) e0
+  : rets_tls e0 -> A :=
+  match
+  e as e1
+  return ((rets_tls e1 -> A) -> rets_tls e0 -> A)
+  with
+  | recvClientHello =>
+    fun a0 : rets_tls recvClientHello -> A =>
+      match e0 as e1 return (rets_tls e1 -> A) with
+      | recvClientHello => a0
+      | _ => fun _ => adef
+      end
+  | recvFinished =>
+    fun a0 : rets_tls recvFinished -> A =>
+      match e0 as e1 return (rets_tls e1 -> A) with
+      | recvFinished => a0
+      | _ => fun _ => adef
+      end
+  | recvCCS =>
+    fun a0 : rets_tls recvCCS -> A =>
+      match e0 as e1 return (rets_tls e1 -> A) with
+      | recvCCS => a0
+      | _ => fun _ => adef
+      end
+  | recvAppData =>
+    fun a0 : rets_tls recvAppData -> A =>
+      match e0 as e1 return (rets_tls e1 -> A) with
+      | recvAppData => a0
+      | _ => fun _ => adef
+      end
+  | getRandomBytes =>
+    fun a0 : rets_tls getRandomBytes -> A =>
+      match e0 as e1 return (rets_tls e1 -> A) with
+      | getRandomBytes => a0
+      | _ => fun _ => adef
+      end
+  | sendPacket =>
+    fun a0 : rets_tls sendPacket -> A =>
+      match e0 as e1 return (rets_tls e1 -> A) with
+      | sendPacket => a0
+      | _ => fun _ => adef
+      end
+  | groupGetPubShared =>
+    fun a0 : rets_tls groupGetPubShared -> A =>
+      match e0 as e1 return (rets_tls e1 -> A) with
+      | groupGetPubShared => a0
+      | _ => fun _ => adef
+      end
+  | makeCertVerify =>
+    fun a0 : rets_tls makeCertVerify -> A =>
+      match e0 as e1 return (rets_tls e1 -> A) with
+      | makeCertVerify => a0
+      | _ => fun _ => adef
+      end
+  end a.
 
 Definition lift_tls A B(e : eff_tls)(a : rets_tls e -> A + option B) e0
   : rets_tls e0 -> A + option B :=
@@ -202,36 +211,6 @@ Notation "r <- ef a ; p" :=
   (@Eff eff_tls args_tls rets_tls _ ef a (fun r => p))
     (at level 100, ef at level 0, right associativity).
 
-(*
-Notation "ch <-recvClientHello ctx ; p" :=
-  (@Eff eff_tls args_tls rets_tls _ recvClientHello ctx (fun ch => p))
-    (at level 100, right associativity).
-
-Notation "v <-recvFinished tt ; p" :=
-  (@Eff eff_tls args_tls rets_tls _ recvFinished tt (fun v => p))
-    (at level 100, right associativity).
-
-Notation "v <-recvCCS tt ; p" :=
-  (@Eff eff_tls args_tls rets_tls _ recvCCS tt (fun v => p))
-    (at level 100, right associativity).
-
-Notation "b <-getRandomBytes n ; p" :=
-  (@Eff eff_tls args_tls rets_tls _ getRandomBytes n (fun b => p))
-    (at level 100, right associativity).
-
-Notation "b <-sendPkt pkt ; p" :=
-  (@Eff eff_tls args_tls rets_tls _ sendPacket pkt (fun b => p))
-    (at level 100, right associativity).
-
-Notation "keys <-genKeys ; p" :=
-  (@Eff eff_tls args_tls rets_tls _ genKeys tt (fun keys => p))
-    (at level 100, right associativity).
-
-Notation "pair <-groupGetPubShared pub ; p" :=
-  (@Eff eff_tls args_tls rets_tls _ groupGetPubShared pub (fun pair => p))
-    (at level 100, right associativity).
- *)
-
 Definition option_beq {A} (A_beq : A -> A -> bool) o1 o2 :=
   match o1, o2 with
   | None, None => true
@@ -242,7 +221,6 @@ Definition option_beq {A} (A_beq : A -> A -> bool) o1 o2 :=
 Parameter HostName : Set.
 Parameter CipherID_beq : CipherID -> CipherID -> bool.
 Parameter cipherID : Cipher -> CipherID.
-Parameter serverSupportedCiphers : ServerParams -> list Cipher.
 Parameter Hash_beq : Hash -> Hash -> bool.
 Parameter cipherHash : Cipher -> Hash.
 
@@ -378,6 +356,171 @@ Fixpoint replicate {A:Set} n (a:A) :=
   | S n' => a::replicate n' a
   end.
 
+Notation "r <- 'yield' e $ a ; p" :=
+  (Eff yield (existT e a)
+       (fun r' =>
+          match r' with
+          | existT e' x => lift_tls_core _ (Return tt) e (fun r => p) e' x
+          end))
+    (at level 100, right associativity).
+
+Instance sigT_rets_inhabit : Inhabit {e & rets_tls e} :=
+  { inhabitant := existT recvCCS tt }.
+
+Instance sigT_argss_inhabit : Inhabit {e & args_tls e} :=
+  { inhabitant := existT recvCCS tt }.
+
+Definition doHandshake (cch: CertificateChain)(pr: PrivateKey)(_:{e & rets_tls e})
+  : t (const_yield { e & args_tls e }) (const_yield {e & rets_tls e}) unit :=
+  chr <- yield recvClientHello $ tt;
+  let certs := getCertificates cch in
+  let ch := fst chr in
+  let chEncoded := snd chr in
+  match chooseCipher (chCiphers ch) serverCiphers with
+  | None => Return tt
+  | Some cipher =>
+    let opt := extension_KeyShare ch.(chExtension) in
+    match opt with
+    | None => Return tt
+    | Some keyShares =>
+      let oks := findKeyShare keyShares serverGroups in
+      match oks with
+      | None => Return tt
+      | Some keyShare =>
+        let ecpub := decodeGroupPublic (ksGroup keyShare) (ksData keyShare) in
+        match ecpub with
+        | inl _ => Return tt
+        | inr cpub =>
+          mecdhePair <- yield groupGetPubShared $ cpub;
+          match mecdhePair with
+          | None => Return tt
+          | Some ecdhePair =>
+            let wspub := encodeGroupPublic (fst ecdhePair) in
+            let ecdhe := ba_convert (snd ecdhePair) in
+            let serverKeyShare := {| ksGroup := (ksGroup keyShare); ksData := wspub |} in
+            
+            (* sendServerHello *)
+            let ks := extensionEncode_KeyShare serverKeyShare in
+            let selectedVersion := extensionEncode_SupportedVersions TLS13 in
+            let extensions' :=
+                [ extensionRaw_KeyShare ks;
+                    extensionRaw_SupportedVersions selectedVersion ]
+            in
+            srand <- yield getRandomBytes $ 32;
+            shEncoded <- yield sendPacket $
+                      (handshake13 [serverHello13 srand (chSession ch) (cipherID cipher) extensions'], None);
+            let usedHash := cipherHash cipher in
+            let hCh := hashWith usedHash [chEncoded; shEncoded] in
+            let hsize := hashDigestSize usedHash in
+            let zero := b_replicate hsize w0 in
+            let earlySecret := hkdfExtract usedHash zero zero in
+            let clientEarlySecret := hkdfExpandLabel usedHash earlySecret (s2b "c e traffic") hCh hsize in
+            
+            let handshakeSecret := hkdfExtract usedHash (hkdfExpandLabel usedHash earlySecret (s2b "derived") (hashWith usedHash [s2b ""]) hsize) ecdhe in
+            let clientHandshakeSecret := hkdfExpandLabel usedHash handshakeSecret (s2b "c hs traffic") hCh hsize in
+            let serverHandshakeSecret := hkdfExpandLabel usedHash handshakeSecret (s2b "s hs traffic") hCh hsize in
+            ccsEncoded <- yield sendPacket $ (changeCipherSpec, None);
+            let _ := tt in
+            extEncoded <- yield sendPacket $
+                       (handshake13 [encryptedExtensions13 []], Some (usedHash, cipher, serverHandshakeSecret, 0));
+
+            let hashSigs := extension_SignatureAlgorithms ch.(chExtension) in
+            let mcred := decideCredInfo pr certs hashSigs in
+            match mcred with
+            | None => Return tt
+            | Some pubhs =>
+              let pub := fst pubhs in
+              let hashSig := snd pubhs in
+              certEncoded <- yield sendPacket $
+                          (handshake13 [certificate13 empty cch [[]]], Some (usedHash, cipher, serverHandshakeSecret, 1));
+              let hashed := hashWith (cipherHash cipher) [chEncoded; shEncoded; extEncoded; certEncoded] in
+              cv <- yield makeCertVerify $ (pub,pr,hashSig,hashed);
+              cvEncoded <- yield sendPacket $
+                        (handshake13 [cv], Some (usedHash, cipher, serverHandshakeSecret, 2));
+              let hashed' := hashWith (cipherHash cipher) [chEncoded; shEncoded; extEncoded; certEncoded; cvEncoded] in
+              finEncoded <- yield sendPacket $
+                         (handshake13 [finished13 (makeVerifyData usedHash serverHandshakeSecret hashed')],
+                          Some (usedHash, cipher, serverHandshakeSecret, 3));
+
+              let hashed'' := hashWith (cipherHash cipher) [chEncoded; shEncoded; extEncoded; certEncoded; cvEncoded; finEncoded] in
+              let applicationSecret := hkdfExtract usedHash (hkdfExpandLabel usedHash handshakeSecret (s2b "derived") (hashWith usedHash [s2b ""]) hsize) zero in
+              let clientApplicationSecret := hkdfExpandLabel usedHash applicationSecret (s2b "c ap traffic") hashed'' hsize in
+              let serverApplicationSecret := hkdfExpandLabel usedHash applicationSecret (s2b "s ap traffic") hashed'' hsize in
+
+              _ <- yield recvCCS $ tt;
+              fin <- yield recvFinished $ (Some (usedHash, cipher, clientHandshakeSecret));
+              if ByteString_beq fin (makeVerifyData usedHash clientHandshakeSecret hashed'') then
+                nat_rect_nondep
+                  (fun _ => Return tt)
+                  (fun _ rec _ =>
+                     data <- yield recvAppData $ (Some (usedHash, cipher, clientApplicationSecret));
+                       _ <- yield sendPacket $ (appData13 (mconcat ([s2b ("HTTP/1.1 200 OK" ++ CR ++ LF ++ "Content-Type: text/plain" ++ CR ++ LF ++ CR ++ LF ++ "Hello, "); data; s2b ("!" ++ CR ++ LF)] ++ replicate 1000 (s2b ".."))), Some (usedHash, cipher, serverApplicationSecret, 0));
+                     (rec tt))
+                  5 tt
+              else Return tt
+            end
+          end
+        end
+      end
+    end
+  end.
+
+Definition main_loop fuel :=
+  nat_rect_nondep
+    (fun _ => _)
+    (fun _ rec l =>
+       list_rec_nondep
+         (fun l0 => rec l0)
+         (fun c l' rec_inner l0n =>
+            let l0 := fst l0n in
+            let n := snd l0n in
+            o <- receive tt;
+              match o with
+              | None => rec_inner (l0, S n)
+              | Some r =>
+                a <- resume c $ r;
+                  _ <- ask a;
+                  rec_inner (replace_list n c l0, S n)
+              end)
+       o <- newAccept sock;
+         match o with
+         | Some s =>
+           pipe (doHandshake certs keys)
+                (fun cnew => 
+
+Definition loop_ex (n i : nat) :=
+  let_coro c0 := ex_coroutine 0 in
+      nat_rect_nondep
+        (fun l =>
+           match nth_err _ l i : option (@coro_type nat nat _ _) with
+           | Some c =>
+             r <- resume c $ 1;
+               putN r;
+               Return _ _ (Some tt)
+           | None => Return args_effect rets_effect None
+           end)
+        (fun m rec l =>
+           putN (0:args_effect putNat);
+             pipe (ex_coroutine m : @coro_type nat nat _ _)
+                  (fun cm =>
+                     rec (cm::l)))
+        n [c0].
+
+
+Definition doHandshake_derive :
+  { state & { step &
+              forall certs priv,
+                { init | @equiv_coro' _ _ _ _ _ state step init (doHandshake certs priv) }}}.
+Proof.
+  do 3 eexists.
+  derive_coro (tt,certs,priv).
+  unfold doHandshake.
+  derive' (tt, certs, priv).
+Defined.
+
+Definition doHandshake_step := Eval cbv [projT1 projT2 doHandshake doHandshake_derive] in (projT1 (projT2 doHandshake_derive)).
+
+(*
 Definition doHandshake (cch: CertificateChain)(pr: PrivateKey) :=
   chr <- recvClientHello tt;
   let certs := getCertificates cch in
@@ -476,7 +619,7 @@ Proof.
 Defined.
 
 Definition doHandshake_step := Eval cbv [projT1 projT2 doHandshake doHandshake_derive] in (projT1 (projT2 doHandshake_derive)).
-
+*)
 Require Import extraction.ExtrHaskellString.
 
 Extract Inductive unit => "()" [ "()" ].
