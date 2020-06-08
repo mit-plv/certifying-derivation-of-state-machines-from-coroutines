@@ -51,9 +51,19 @@ Fixpoint replace_list (A:Set) n a (l : list A):=
     end
   end.
 
+Class HasGenForall2 (F : Set -> Set) :=
+  { GenForall2 : forall (A1 A2 : Set), (A1 -> A2 -> Prop) -> F A1 -> F A2 -> Prop }.
+
+Instance HasGenForall2_Foldable (F : Set -> Set) `{F_Foldable : Foldable F}
+  : HasGenForall2 F :=
+  { GenForall2 A1 A2 R x1 x2 :=
+      exists x, zip _ _ x1 x2 = Some x /\ fold_right (fun '(a1,a2) p => R a1 a2 /\ p) True (to_list _ x) }.
+
+(*
 Definition GenForall2 (A1 A2:Set) (F: Set -> Set) `{F_Foldable : Foldable F}
            (R : A1 -> A2 -> Prop) (x1 : F A1) (x2 : F A2) :=
   exists x, zip _ _ x1 x2 = Some x /\ fold_right (fun '(a1, a2) (p:Prop) => R a1 a2 /\ p) True (to_list _ x).
+*)
 
 Lemma GenForall2_cons : forall (A1 A2 :Set)(R : A1 -> A2 -> Prop) (x1 : list A1) (x2 : list A2) a1 a2,
     R a1 a2 ->

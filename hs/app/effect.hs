@@ -43,7 +43,11 @@ main = withSocketsDo $ do
 
 core sock x ef (r::Any) newAccepts received = do
   case main_loop_step x ef r of
-    Right res -> putStrLn "Done" >> forM_ sock (\(_,s) -> close s)
+    Right res -> do
+      b <- readIORef test
+      if b then putStrLn "!" else putStrLn "."
+      putStrLn "Done"
+      forM_ sock (\(_,s) -> close s)
     Left (next, Nothing) -> core sock next NewAccept (unsafeCoerce ()) newAccepts received
     Left (next, Just (ExistT e a)) ->
       case e of

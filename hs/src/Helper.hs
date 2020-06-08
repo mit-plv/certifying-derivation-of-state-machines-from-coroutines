@@ -8,6 +8,8 @@ import qualified Data.ByteString as B
 import qualified Data.ByteArray as B (convert)
 import Data.List
 import Data.Maybe
+import Data.IORef
+import System.IO.Unsafe (unsafePerformIO)
 import qualified Data.X509 as X
 import qualified Crypto.PubKey.RSA as RSA
 import qualified Crypto.PubKey.RSA.PSS as PSS
@@ -70,6 +72,9 @@ recordToPacket (Record ProtocolType_Handshake _ fragment) =
     Right a -> Just $ Handshake13 a
     Left _ -> Nothing
 
+test :: IORef Bool
+test = unsafePerformIO $ newIORef False
+
 decodeRecord :: Header -> Maybe ((Hash, Cipher), B.ByteString) -> B.ByteString -> Maybe Packet13
 decodeRecord header m msg =
   let rst =
@@ -95,6 +100,6 @@ decodeRecord header m msg =
                 }
   in
   case runRecordM (decodeRecordM header msg) newRecordOptions rst of
-    Left _ -> Nothing
+    Left _ -> unsafePerformIO (writeIORef test True >> readIORef test >>= \t -> if t then return Nothing else return Nothing)
     Right (a,_) -> recordToPacket a
     
