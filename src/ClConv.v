@@ -213,17 +213,66 @@ Ltac dest_sum :=
     unify g e
   end.
 
+Definition dmmy (A:Set)(_:A) := True.
+
 Ltac free_var body vars :=
-  lazymatch vars with
-  | (?rest,?a) =>
-    let r := free_var body rest in
-    lazymatch body with
-    | context [a] =>
-      constr:((r,a))
-    | _ => r
-    end
-  | ?a => tt
+  lazymatch goal with
+    _ : dummy ?env |- _ =>
+    let rec aux vars :=
+        lazymatch vars with
+        | env => env
+        | (?rest,?a) =>
+          let r := aux rest in
+          lazymatch body with
+          | context [a] => constr:((r,a))
+          | _ => r
+          end
+        | _ => tt
+        end
+    in
+    aux vars
+  | _ =>
+    let rec aux vars :=
+        lazymatch vars with
+        | (?rest,?a) =>
+          let r := aux rest in
+          lazymatch body with
+          | context [a] => constr:((r,a))
+          | _ => r
+          end
+        | _ => tt
+        end
+    in
+    aux vars
   end.
+(*
+Ltac free_var body vars :=
+  lazymatch goal with
+    _ : dmmy ?env |- _ =>
+    lazymatch vars with
+    | env => env
+    | (?rest,?a) =>
+      let r := free_var body rest in
+      lazymatch body with
+      | context [a] =>
+        constr:((r,a))
+      | _ => r
+      end
+    | ?a => tt
+    end
+  | _ =>
+    lazymatch vars with
+    | (?rest,?a) =>
+      let r := free_var body rest in
+      lazymatch body with
+      | context [a] =>
+        constr:((r,a))
+      | _ => r
+      end
+    | ?a => tt
+    end
+  end.
+*)
 
 Definition nat_rect_nondep A f (f0 : nat -> A -> A) :=
   fix F (n : nat) : A :=
@@ -372,6 +421,30 @@ Proof.
   subst.
   auto.
 Qed.
+
+(*
+Lemma derive_nat_rect : forall state A C D (eff : Set)(args rets : eff -> Set) N (a0:A) f f0 st0 stS op0 opS step g,
+    (forall a, equiv' step g (st0 a) (f a a) (op0 a)) ->
+    (forall N0,
+        (forall a, equiv' step g
+                          ((fix aux N0 := match N0 with O => st0 a | S N0' => stS a N0' end) N0)
+                          (nat_rect_nondep (f a) (f0 a) N0 a)
+                          ((fix aux N0 := match N0 with O => op0 a | S N0' => opS a N0' end) N0)) ->
+        (forall a, equiv' step g (stS a N0)
+                          (f0 a N0
+                              (nat_rect_nondep
+                                    (f a) (f0 a)
+                                    N0) a) (opS a N0))) ->
+    @equiv' _ args rets C D state step g
+            ((fix aux n := match n with O => st0 a0 | S n0 => stS a0 n0 end) N)
+            (nat_rect_nondep (f a0) (f0 a0) N a0)
+            ((fix aux n := match n with O => op0 a0 | S n0 => opS a0 n0 end) N).
+Proof.
+  intros.
+  revert a0.
+  induction N; intros; simpl; auto.
+Qed.
+*)
 
 Lemma derive_nat_rect : forall state A C D (eff : Set)(args rets : eff -> Set) N (a0:A) f f0 st0 stS op0 opS step g,
     (forall a, equiv' step g (st0 a) (f a a) (op0 a)) ->
@@ -609,23 +682,20 @@ Ltac dest_step :=
     pattern_rhs r;
     apply equal_f;
       lazymatch goal with
-        |- _ = ?rhs =>
+        |- ?lhs = ?rhs =>
         lazymatch ef with
         | yield =>
-          (change rhs with (const rhs yield))
-          || simpl;replace rhs with (const rhs yield) by (unfold const; reflexivity)
+          enough (lhs = const rhs yield) by (unfold const; assumption)
         | _ => change rhs with (lift_eff ef rhs ef)
         end
       end;
       (apply equal_f_dep || apply equal_f);
       try unfold const;
       simpl;
-      repeat (dest_sum; simpl);
+      repeat (dest_sum; unfold sum_merge; cbv beta iota);
       unify_fun
   | |- _ ?r = _ => repeat (dest_sum; unfold sum_merge; cbv beta iota); unify_fun
   end.
-
-Definition label := fun _:nat => True.
 
 Lemma bind_if : forall C D (b:bool)(p q : t args_effect rets_effect C)(r : C -> t args_effect rets_effect D),
   bind (if b then p else q) r
@@ -758,19 +828,21 @@ Ltac derive_core ptr env :=
     lazymatch prog with
     | @Eff _ ?args ?rets ?C ?e _ _ =>
       lazymatch C with
-      | unit =>
+      | _ (*unit*) =>
         let fv := free_var prog env in
         eapply (Equiv'Eff (ptr (inl fv)) e);
         [ let H := fresh in
           intro H;
           derive_core (fun x => ptr (inr x)) (fv,H)
         | intros; dest_step]
+          (*
       | _ =>
         eapply (Equiv'Eff (ptr (inl env)) e);
         [ let H := fresh in
           intro H;
           derive_core (fun _x => ptr (inr _x)) (env,H)
         | intros; dest_step]
+*)
       end
     | Return _ =>
       idtac
@@ -787,6 +859,8 @@ Ltac derive_core ptr env :=
                             simpl; reflexivity
                           end]
             || *)
+            
+            assert (dmmy env) by (unfold dmmy; exact I);
             let ptr := next_ptr open_constr:(fun _x => _x) in
             derive_core ptr env
           | let r := fresh in
@@ -939,9 +1013,12 @@ Ltac to_dummy i p :=
   | @Eff ?eff ?args ?rets ?C ?e ?a ?f =>
     let x := (eval cbv beta in (f (dummy _ _ i))) in
     let d := to_dummy (S i) x in
-    lazymatch (eval pattern (dummy _ (rets e) i) in d) with
-    | ?g _ =>
-      constr:((@Eff eff args rets C e a, g))
+    lazymatch type of f with
+    | ?T -> _ =>
+      lazymatch (eval pattern (dummy _ T i) in d) with
+      | ?g _ =>
+        constr:((@Eff eff args rets C e a, g))
+      end
     end
   | @proc_coro ?A ?B ?C ?D ?eff ?args ?rets ?state ?step ?c ?z ?f =>
     let x := (eval cbv beta in (f (dummy _ _ i) (dummy _ _ (S i)))) in
@@ -1149,8 +1226,8 @@ Ltac derive_coro env :=
       simpl;
       lazymatch goal with
         |- _ ?a = _ =>
-        pattern_rhs a; apply eq_refl
-      | _ => apply eq_refl
+        pattern_rhs a; refine eq_refl
+      | _ => refine eq_refl
       end
     | _ => try unify_fun
     end
@@ -1215,8 +1292,8 @@ Proof.
     simpl;
     lazymatch goal with
       |- _ ?a = _ =>
-      pattern_rhs a; apply eq_refl
-    | _ => apply eq_refl
+      pattern_rhs a; refine eq_refl
+    | _ => refine eq_refl
     end
   | _ => idtac
   end.
@@ -1377,7 +1454,12 @@ Ltac proc_step :=
       |- context [match op ?x with _ => _ end] =>
       specialize (H1 x);
       destruct (op x);
-      inversion H1; subst;
+      let s0 := fresh in
+      let op0 := fresh in
+      let o0 := fresh in
+      let H3 := fresh in
+      let H4 := fresh in
+      inversion H1 as [|s0 op0 o0 (H3,H4)]; subst;
       unfold proc_coro at 1, seqE at 1;
       lazymatch goal with
         H_ : _ = c x |- _ =>
@@ -1413,8 +1495,8 @@ Ltac mid_eq_core :=
   || (repeat match goal with
              | H : _ |- _ => apply H
              end;
-      now eauto with foldable equivc)
-  || (exfalso; now eauto with foldable)
+      solve [discriminate || eauto with foldable equivc])
+  || (exfalso; solve [eauto with foldable])
   || reflexivity
   || lazymatch goal with
        |- Eff _ _ _ = Eff _ _ _ =>

@@ -354,6 +354,7 @@ Parameter decodeHeader : ByteString -> Header.
 Parameter decodeRecord : Header -> option (Hash * Cipher * ByteString * nat) -> ByteString -> option CPacket.
 Parameter Bsplit :  ByteString -> nat -> ByteString * ByteString.
 
+(*
 Definition recvExactBytes bs0 n
   : t (const_yield args_tls') (const_yield rets_tls') (option (ByteString * ByteString) ) := Eval unfold sum_merge in
   nat_rect_nondep
@@ -367,7 +368,7 @@ Definition recvExactBytes bs0 n
          Return (Some (Bsplit bs' n)))
     n bs0.
 
-Definition recvAndParse bs0 s o : t (const_yield args_tls') (const_yield rets_tls') (ByteString * option rets_tls') :=
+Definition recvAndParse bs0 (s:unit+unit+unit+unit) o : t (const_yield args_tls') (const_yield rets_tls') (ByteString * option rets_tls') :=
   hd <<- recvExactBytes bs0 5;
   match hd with
   | None => Return (bs0,None)
@@ -385,17 +386,17 @@ Definition recvAndParse bs0 s o : t (const_yield args_tls') (const_yield rets_tl
       | None => Return (rem,None)
       | Some r =>
         match s with
-        | inr tt =>
+        | inr _ =>
           match clientHello r with
           | None => Return (rem,None)
           | Some c => Return (rem,Some (inr (bs,c)))
           end
-        | inl (inr tt) =>
+        | inl (inr _) =>
           match changeCipherSpec r with
           | None => Return (rem,None)
-          | Some tt => Return (rem,Some (inl (inr tt)))
+          | Some _ => Return (rem,Some (inl (inr tt)))
           end
-        | inl (inl (inr tt)) =>
+        | inl (inl (inr _)) =>
           match handshake r with
           | None => Return (rem,None)
           | Some h =>
@@ -404,7 +405,7 @@ Definition recvAndParse bs0 s o : t (const_yield args_tls') (const_yield rets_tl
             | Some f => Return (rem,Some (inl (inl (inr f))))
             end
           end
-        | inl (inl (inl tt)) =>
+        | inl (inl (inl _)) =>
           match appData r with
           | None => Return (rem,None)
           | Some a => Return (rem,Some (inl (inl (inr a))))
@@ -413,6 +414,7 @@ Definition recvAndParse bs0 s o : t (const_yield args_tls') (const_yield rets_tl
       end
     end
   end.
+ *)
 
 Notation "x <~ 'ifSome' o 'else' q ; p" :=
   (option_branch (fun x => p) q o)
@@ -519,7 +521,76 @@ Definition doHandshake_equiv' fuel certs keys
 
 Hint Resolve doHandshake_equiv doHandshake_equiv' : equivc.
 Hint  Resolve doHandshake_equiv : equivc'.
-    
+
+Definition parse header bs (s:unit+unit+unit+unit) o : t (const_yield args_tls') (const_yield rets_tls') (option rets_tls') :=
+  match decodeRecord header o bs with
+  | None => Return None
+  | Some r => 
+    match s with
+    | inr _ =>
+      match clientHello r with
+      | None => Return None
+      | Some c => Return (Some (inr (bs,c)))
+      end
+    | inl (inr _) =>
+      match changeCipherSpec r with
+      | None => Return None
+      | Some _ => Return (Some (inl (inr tt)))
+      end
+    | inl (inl (inr _)) =>
+      match handshake r with
+      | None => Return None
+      | Some h =>
+        match finished h with
+        | None => Return None
+        | Some f => Return (Some (inl (inl (inr f))))
+        end
+      end
+    | inl (inl (inl _)) =>
+      match appData r with
+      | None => Return None
+      | Some a => Return (Some (inl (inl (inr a))))
+      end
+    end
+  end.
+
+Definition readWrite fuel certs keys(_: rets_tls') : t (const_yield args_tls') (const_yield rets_tls') (option unit) :=
+  pipe (doHandshake fuel certs keys) (fun coro : coro_type doHandshake_step =>
+  nat_rect_nondep
+    (fun _ => Return None)
+    (fun _ rec (obac: option ((unit+unit+unit+unit)*option (Hash*Cipher*ByteString*nat)) * ByteString * rets_tls' * coro_type doHandshake_step) =>
+       let bs := snd (fst (fst obac)) in
+       let a := snd (fst obac) in
+       let c := snd obac in
+       match fst (fst (fst obac)) with
+       | None =>
+         r <- resume c $ a;
+         match r with
+         | inr eo =>
+           _ <- yield (inl (inl (inl (inl (inl 1)))));
+           rec (Some eo, bs, a, c)
+         | _ =>
+           a' <- yield r;
+             rec (None, bs, a', c)
+         end
+       | Some o =>
+         bs' <- yield RecvData $ tt & None;
+           if Nat.ltb (Blength bs' + Blength bs) 5 then
+             rec (Some o, mconcat [bs; bs'], a, c)
+           else
+             let p := Bsplit (mconcat [bs; bs']) 5 in
+             let header := decodeHeader (fst p) in
+             if Nat.ltb (Blength (snd p)) (hdReadLen header) then
+               rec (Some o, mconcat [bs; bs'], a, c)
+             else
+               let p' := Bsplit (snd p) (hdReadLen header) in
+               a' <<- parse header (fst p') (fst o) (snd o);
+                 a'' <~ ifSome a' else Return None;
+       rec (None, snd p', a'', c)
+     end)
+    fuel (None,empty, inl (inr tt), coro)).
+
+(*
 Definition readWrite fuel certs keys(_: rets_tls') : t (const_yield args_tls') (const_yield rets_tls') (option unit) :=
   pipe (doHandshake fuel certs keys) (fun c : coro_type doHandshake_step =>
   nat_rect_nondep
@@ -539,6 +610,7 @@ Definition readWrite fuel certs keys(_: rets_tls') : t (const_yield args_tls') (
            rec (bs, a', c)
          end)
     fuel (empty, inl (inr tt), c)).
+*)
 
 Inductive GenForall2_prod_r (A A1 A2 : Set)(R : A1 -> A2 -> Prop) : A * A1 -> A * A2 -> Prop :=
   GenForall2_prod_r_rule : forall a x1 x2, R x1 x2 -> GenForall2_prod_r A A1 A2 R (a,x1) (a,x2).
@@ -552,27 +624,30 @@ Program Instance id_HasGenForall2 : HasGenForall2 (fun A:Set => A) :=
 Instance ByteString_inhabitant : Inhabit ByteString :=
   { inhabitant := empty }.
 
+Definition ts := True.
+
 Ltac derive_core'' ptr env :=
-  unfold recvExactBytes;
   st_op_to_ev;[
   lazymatch goal with
     |- equiv' _ _ _ ?prog _ =>
     lazymatch prog with
     | @Eff _ ?args ?rets ?C ?e _ _ =>
       lazymatch C with
-      | unit =>
+      | _ =>
         let fv := free_var prog env in
         eapply (Equiv'Eff (ptr (inl fv)) e);
         [ let H := fresh in
           intro H;
           derive_core'' (fun x => ptr (inr x)) (fv,H)
         | intros; dest_step]
+          (*
       | _ =>
         eapply (Equiv'Eff (ptr (inl env)) e);
         [ let H := fresh in
           intro H;
           derive_core'' (fun _x => ptr (inr _x)) (env,H)
         | intros; dest_step]
+*)
       end
     | Return _ =>
       idtac
@@ -589,6 +664,7 @@ Ltac derive_core'' ptr env :=
                             simpl; reflexivity
                           end]
             ||*)
+            assert (dmmy env) by (unfold dmmy; exact I);
             let ptr := next_ptr open_constr:(fun _x => _x) in
             derive_core'' ptr env
           | let r := fresh in
@@ -640,11 +716,15 @@ Ltac derive_core'' ptr env :=
       ]
     | nat_rect_nondep _ _ _ _ =>
       idtac "test";
-      (solve [repeat match goal with
+      (simpl in *; solve [repeat match goal with
                      | H : ?p |- _ => apply H
                      end])
       ||
-      (eapply (derive_nat_rect _ _ (fun a b => _) (fun a => _) (fun a => _));
+      (lazymatch goal with
+         _ : ts |- _ =>
+         idtac
+       | _ =>
+        eapply (derive_nat_rect _ _ (fun a b => _) (fun a => _) (fun a => _));
        [ let a := fresh in
          intro a;
          cbv beta;
@@ -655,9 +735,10 @@ Ltac derive_core'' ptr env :=
          let a := fresh in
          intros n H a;
          cbv beta;
+         assert ts by (unfold ts; exact I);
          let ptr := next_ptr open_constr:(fun _x => _x) in
          derive_core'' ptr (env,n,a)
-      ])
+      ] end)
     | list_rec_nondep _ _ _ _ =>
       (solve [repeat match goal with
                    | H : ?p |- _ => apply H
@@ -681,6 +762,8 @@ Ltac derive_core'' ptr env :=
     end
   end|unify_fun..].
 
+
+
 Definition readWrite_derive :
   { state & { step &
               forall fuel certs priv,
@@ -700,16 +783,20 @@ Proof.
   simpl.
   assert (readWrite fuel certs priv r = ltac:(let x' := eval red in (readWrite fuel certs priv r) in
                               let x'' := coro_to_state x' in exact x'')).
-  unfold readWrite, pipe.
+  unfold readWrite, pipe, option_branch.
   lazymatch goal with
-  | |- @nat_rect_nondep ?A ?f0 _ ?k (?a1,?a2,?l) = nat_rect_nondep _ _ _ (_,_,?l') =>
+  | |- @nat_rect_nondep ?A ?f0 ?f ?k (?a0,?a1,?a2,?l) = nat_rect_nondep _ ?f' _ (_,_,_,?l') =>
+    let x := fresh in
+    set (x := f);
+      let y := fresh in
+      set (y := f');
         lazymatch type of f0 with
         | context [ @coro_type _ _ _ ?state ?step ] =>
             cut
              (GenForall2
                 (fun (coro : coro_type step) (st : state) =>
                  equiv_coro' step st coro) l l');
-             [ generalize l, l', a1, a2;
+             [ generalize l, l', a0, a1, a2; subst x; subst y;
              induction k; intros;
              lazymatch goal with
              | |- nat_rect_nondep ?f ?f0 _ _ = nat_rect_nondep ?f' ?f0' _ _ =>
@@ -730,59 +817,93 @@ Proof.
         | ?T => idtac T
         end
   end.
-  mid_eq_core.
-  assert (equiv_coro'  doHandshake_step s t).
+  apply eq_refl.
+  assert (equiv_coro' doHandshake_step s t).
   inversion H.
   simpl. auto.
-  destruct H0.
-  inversion H0.
+  unfold sum_merge in *.
+  repeat mid_eq_core.
+  destruct H1.
+  destruct s1.
+  destruct s1.
+  apply eq_refl.
+  lazymatch goal with
+    |- (if ?x then _ else _) = (if ?y then _ else _) =>
+    destruct x eqn:?, y eqn:?
+  end.
+  simpl in Heqo0, Heqo1.
   subst.
-  unfold  step_state at 1, seqE' at 1; rewrite H7.
-  specialize (H6 s0).
-  inversion H6.
-  unfold fst, snd in *.
-  rewrite <- H2.
+  inversion Heqo1.
   subst.
-  unfold proc_coro at 1, seqE at 1.
+  apply IHfuel.
+  simpl. assumption.
+  simpl in Heqb1, Heqb0.
+  rewrite Heqb0 in Heqb1.
+  discriminate.
+  simpl in Heqb1, Heqb0.
+  rewrite Heqb1 in Heqb0.
+  discriminate.
+  lazymatch goal with
+    |- (if ?x then _ else _) = (if ?y then _ else _) =>
+    destruct x eqn:?, y eqn:?
+  end.
+  simpl in Heqo0, Heqo1.
+  subst.
+  inversion Heqo1. subst.
+  apply IHfuel.
+  simpl. assumption.
+  simpl in Heqb2, Heqb3.
+  rewrite Heqb2 in Heqb3.
+  discriminate.
+  simpl in Heqb2, Heqb3.
+  rewrite Heqb2 in Heqb3.
+  discriminate.
+  simpl in *.
+  subst.
+  inversion Heqo1. subst.
+  f_equal.
+  extensionality a'.
+  repeat mid_eq_core.
+  apply eq_refl.
+  apply eq_refl.
+  simpl in Heqo0, Heqo1.
+  subst.
+  discriminate.
+  simpl in Heqo0, Heqo1.
+  subst.
+  discriminate.
   rewrite <- H1.
   destruct a.
   repeat mid_eq_core.
   apply IHfuel.
   simpl.
-  unfold equiv_coro'.
-  eexists.
-  destruct e.
-  econstructor; eauto.
-  f_equal.
-  extensionality a'.
-  destruct (let (_,y) := a' in y).
+  econstructor.
+  econstructor.
+  intro.
+  apply H7.
+  simpl in H8.
+  simpl.
+  apply H8.
+  repeat mid_eq_core.
   apply IHfuel.
   simpl.
-  eexists.
-  destruct e.
-  econstructor; eauto.
-  simpl.
-  reflexivity.
-  subst.
-  destruct H3.
-  unfold proc_coro at 1, seqE at 1.
-  unfold fst, snd.
-  rewrite H3.
+  econstructor.
+  econstructor.
+  intro.
+  auto.
+  auto.
   rewrite <- H1.
-  reflexivity.
+  apply eq_refl.
 
   rewrite H.
-  clear H.
-  unfold step_state.
 
-  unfold recvAndParse, recvExactBytes.
-  (*
-  Set Ltac Debug.
-  derive_core'' open_constr:(fun a => inr a) (tt,fuel,certs,priv,r);
-  let ptr := next_ptr open_constr:(fun _x => _x) in
+  unfold recvAndParse, option_branch, sum_merge, step_state.
+
+  derive_core'' open_constr:(fun a => inr a) (tt,fuel,certs,priv,r).
+  all: try (let ptr := next_ptr open_constr:(fun _x => _x) in
   lazymatch goal with
     |- equiv' ?step _ _ (Return ?r) _ =>
-    apply (Equiv'Return step _ (ptr r) None);
+    eapply (Equiv'Return step _ (ptr None));
       simpl;
       split;
       lazymatch goal with
@@ -791,9 +912,23 @@ Proof.
           apply eq_refl
       | _ => apply eq_refl
       end
+  end).
+  let ptr := next_ptr open_constr:(fun _x => _x) in
+  lazymatch goal with
+    |- equiv' ?step _ _ (Return ?r) _ =>
+    eapply (Equiv'Return step)
   end.
-   *)
-Abort.
+  split.
+  apply eq_refl.
+  apply eq_refl.
+  all: try (let ptr := next_ptr open_constr:(fun _x => _x) in
+  lazymatch goal with
+    |- equiv' ?step _ _ (Return ?r) _ =>
+    eapply (Equiv'Return step)
+  end; split; apply eq_refl).
+  Grab Existential Variables.
+  all: exact inhabitant.
+Defined.
 
 Definition doHandshake_derive :
   { state & { step &
