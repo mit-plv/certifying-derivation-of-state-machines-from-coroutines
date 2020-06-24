@@ -1532,13 +1532,19 @@ Ltac proc_step :=
     dest_yield
   end.
 
-Ltac dest_opt :=
+Ltac dest_match :=
   lazymatch goal with
     |- match ?o with _ => _ end = option_branch _ _ ?o0 =>
     destruct o eqn:?, o0 eqn:?;
+             [|try (exfalso; solve [eauto with foldable])..|];
              unfold option_branch
+    
   | |- match ?x with _ => _ end = match ?y with _ => _ end =>
-    destruct x eqn:?, y eqn:?
+    lazymatch x with
+    | y => destruct x eqn:?
+    | _ => destruct x eqn:?, y eqn:?;
+             [|try (exfalso; solve [eauto with foldable])..|]
+    end
   end.
 
 Notation "'let_coro' x := c 'in' p" :=
@@ -1547,15 +1553,16 @@ Notation "'let_coro' x := c 'in' p" :=
     (at level 200, only parsing).
 
 Ltac mid_eq_core :=
-  generalize_and_ind
-  || dest_opt
+  dest_match
   || proc_step
   || (repeat match goal with
              | H : _ |- _ => apply H
              end;
       ((simpl in *; congruence) || solve [eauto with foldable equivc] || solve [simpl; eauto]))
+  || generalize_and_ind
+  (*
   || (exfalso; solve [eauto with foldable])
-  || reflexivity
+*)
   || lazymatch goal with
        |- Eff _ _ _ = Eff _ _ _ =>
        f_equal;
@@ -1683,7 +1690,7 @@ Ltac derive env :=
                           let x'' := coro_to_state x' in exact x''))
       as H by
          (change x with ltac:(let x0 := eval red in x in exact x0);
-            unfold pipe;
+            unfold pipe, sum_merge;
             repeat mid_eq_core);
     rewrite H;
     clear H;
@@ -1693,12 +1700,13 @@ Ltac derive env :=
     | unfold option_branch;
       derive_core open_constr:(fun a => inr a) env ]
   | |- _ ?init _ =>
-    unfold sum_merge;
     let u := open_constr:(inl env) in
     unify init u;
     econstructor;
     econstructor;
-    intros; [|dest_step];
+    [|intros; dest_step];
+    let r := fresh in
+    intro r;
     let H := fresh in
     lazymatch goal with
       |- _ ?x _ =>
@@ -1706,15 +1714,12 @@ Ltac derive env :=
                             let x'' := coro_to_state x' in exact x''))
         as H by
             (change x with ltac:(let x0 := eval red in x in exact x0);
-             unfold pipe;
+             unfold pipe, sum_merge;
              repeat mid_eq_core);
       rewrite H;
       clear H;
-      unfold step_state, option_branch;
-      let r := fresh in
-      repeat eexists; try econstructor;
-      [ intro r; derive_core open_constr:(fun x => inr x) (env,r)
-      | intros; dest_step ]
+      unfold step_state, option_branch, sum_merge;
+      derive_core open_constr:(fun _x => inr _x) (env,r)
     end
   end;
   lazymatch goal with
