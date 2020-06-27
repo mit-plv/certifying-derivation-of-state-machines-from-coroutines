@@ -75,12 +75,12 @@ recordToPacket (Record ProtocolType_Handshake _ fragment) =
 test :: IORef Bool
 test = unsafePerformIO $ newIORef False
 
-decodeRecord :: Header -> Maybe ((Hash, Cipher), B.ByteString) -> B.ByteString -> Maybe Packet13
+decodeRecord :: Header -> Maybe (((Hash, Cipher), B.ByteString), Int) -> B.ByteString -> Maybe Packet13
 decodeRecord header m msg =
   let rst =
         case m of
           Nothing -> newRecordState
-          Just ((h,cipher),secret) ->
+          Just (((h,cipher),secret), sn)->
             let bulk    = cipherBulk cipher
                 keySize = bulkKeySize bulk
                 ivSize  = max 8 (bulkIVSize bulk + bulkExplicitIV bulk)
@@ -94,7 +94,7 @@ decodeRecord header m msg =
             in
             RecordState {
                   stCryptState  = cst
-                , stMacState    = MacState { msSequence = 0 }
+                , stMacState    = MacState { msSequence = fromIntegral sn }
                 , stCipher      = Just cipher
                 , stCompression = nullCompression
                 }

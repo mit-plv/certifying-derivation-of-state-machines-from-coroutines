@@ -60,9 +60,10 @@ Definition CHandshake :=
  *)
 
 Inductive CServerRandom := SR : ByteString -> CServerRandom.
+Inductive CClientRandom := CRn : ByteString -> CClientRandom.
 
 Inductive CHandshake :=
-| HClientHello : Version -> ByteString -> Session -> list ExtensionRaw -> list CipherID -> CHandshake
+| HClientHello : Version -> CClientRandom -> Session -> list CipherID -> list ExtensionRaw -> CHandshake
 | HServerHello : CServerRandom -> Session -> CipherID -> list ExtensionRaw -> CHandshake
 | HNewSessionTicket : Word32 -> Word32 -> ByteString -> ByteString -> list ExtensionRaw -> CHandshake
 | HEndOfEarlyData : CHandshake
@@ -85,14 +86,14 @@ Record ClientHelloMsg :=
   { chVersion : Version;
     chRand : ByteString;
     chSess : Session;
-    chExt : list ExtensionRaw;
-    chCipherIDs : list CipherID
+    chCipherIDs : list CipherID;
+    chExt : list ExtensionRaw
   }.
                  
 Definition clientHello (h : CPacket) :=
   match h with
-  | PHandshake [HClientHello v rand sess ext cipherIDs] =>
-    Some {| chVersion:=v; chRand:=rand; chSess:=sess; chExt:=ext; chCipherIDs:=cipherIDs  |}
+  | PHandshake [HClientHello v (CRn rand) sess cipherIDs ext] =>
+    Some {| chVersion:=v; chRand:=rand; chSess:=sess; chCipherIDs:=cipherIDs; chExt:=ext |}
   | _ => None
   end.
 
@@ -285,8 +286,7 @@ Fixpoint replicate {A:Set} n (a:A) :=
   end.
 
 Definition args_tls' :=
-  ByteString + nat + unit + GroupPublic + PublicKey * PrivateKey * HashAndSignatureAlgorithm * ByteString + CPacket * option (Hash * Cipher * ByteString) + (unit + unit + unit + unit) * option (Hash * Cipher * ByteString).
-
+  CPacket * option (Hash * Cipher * ByteString * nat) + nat + unit + GroupPublic + PublicKey * PrivateKey * HashAndSignatureAlgorithm * ByteString + CPacket * option (Hash * Cipher * ByteString) + (unit + unit + unit + unit) * option (Hash * Cipher * ByteString).
 
 Definition rets_tls' :=
    option (GroupPublic * GroupKey) + CHandshake + ByteString + unit + ByteString * ClientHelloMsg.
@@ -352,11 +352,40 @@ Definition hdReadLen hd :=
 
 Parameter decodeHeader : ByteString -> Header.
 Parameter decodeRecord : Header -> option (Hash * Cipher * ByteString * nat) -> ByteString -> option CPacket.
-Parameter Bsplit :  ByteString -> nat -> ByteString * ByteString.
+Parameter Bsplit :  nat -> ByteString -> ByteString * ByteString.
 
 Notation "x <~ 'ifSome' o 'else' q ; p" :=
   (option_branch (fun x => p) q o)
     (at level 100, right associativity).
+
+Inductive PskKexMode := PSK_KE | PSK_DHE_KE.
+
+(*
+Definition choosePSK exts dhModes :=
+  match extension_PreSharedKey exts with
+  | Some (sessionID, obfAge::_, bnds) =>
+    bnd <~ ifSome hd_error bnds else Return (zero, None, false);
+    if inb PskKexMode_beq PSK_DHE_KE dhModes then
+      let len := sum (map (fun x => Blength x + 1) bnds) + 2 in
+      osdata <<- sessionResume $ sessionID;
+      sdata <~ ifSome osdata else Return (zero, None, false);
+      tinfo <~ ifSome sessionTicketInfo sdata else Return (zero, None, false);
+      let psk := sessionSecret sdata in
+      isFresh <<- checkFreshness tinfo obfAge;
+      let (isPSKValid, is0RTTValid) := checkSessionEquality sdata in
+      if isPSKValid && isFresh then
+        Return (psk, Some (bnd, 0, len), is0RTTValid)
+      else Return (zero, None, false)
+    else Return (zero, None, false)
+  | _ => Return (zero, None, fasle)
+  end.
+
+Definition checkBinder earlySecret binderInfo :=
+  match binderInfo with
+  | None => Return []
+  | Some (binder, n, tlen) =>
+    
+ *)
 
 Definition doHandshake (fuel:nat) (cch: CertificateChain)(pr: PrivateKey)(_: rets_tls')
   : t (const_yield args_tls') (const_yield rets_tls') unit := Eval unfold option_branch in
@@ -388,6 +417,13 @@ Definition doHandshake (fuel:nat) (cch: CertificateChain)(pr: PrivateKey)(_: ret
             (PHandshake [HServerHello (SR srand) sess (cipherID cipher) extensions'], None);
   let usedHash := cipherHash cipher in
   let hCh := hashWith usedHash [chEncoded; shEncoded] in
+
+  (*
+  dhModes <~ ifSome extension_PskKeyModes chExts else Return tt;
+  p <<- choosePSK exts dhModes;
+  let (psk, binderInfo, is0RTTValid) := p in
+  let earlyKey := 
+*)
   let hsize := hashDigestSize usedHash in
   let zero := b_replicate hsize w0 in
   let earlySecret := hkdfExtract usedHash zero zero in
@@ -457,34 +493,34 @@ Notation "r <- 'yield' 'SendData' $ a ; p" :=
        (fun r => p))
     (at level 100, right associativity).
 
-Definition parse header bs (s:unit+unit+unit+unit) o : t (const_yield args_tls') (const_yield rets_tls') (option rets_tls') :=
+Definition parse header bs (s:unit+unit+unit+unit) o : t (const_yield args_tls') (const_yield rets_tls') (option (String.string + rets_tls')) :=
   match decodeRecord header o bs with
-  | None => Return None
+  | None => Return (Some (inl "decode failed"))
   | Some r => 
     match s with
     | inr _ =>
       match clientHello r with
-      | None => Return None
-      | Some c => Return (Some (inr (bs,c)))
+      | None => Return (Some (inl "cliehthello not match"))
+      | Some c => Return (Some (inr (inr (bs,c))))
       end
     | inl (inr _) =>
       match changeCipherSpec r with
-      | None => Return None
-      | Some _ => Return (Some (inl (inr tt)))
+      | None => Return (Some (inl "changecipherspec not match"))
+      | Some _ => Return (Some (inr (inl (inr tt))))
       end
     | inl (inl (inr _)) =>
       match handshake r with
-      | None => Return None
+      | None => Return (Some (inl "handshake not match"))
       | Some h =>
         match finished h with
-        | None => Return None
-        | Some f => Return (Some (inl (inl (inr f))))
+        | None => Return (Some (inl "finished not match"))
+        | Some f => Return (Some (inr (inl (inl (inr f)))))
         end
       end
     | inl (inl (inl _)) =>
       match appData r with
-      | None => Return None
-      | Some a => Return (Some (inl (inl (inr a))))
+      | None => Return (Some (inl "appdata not match"))
+      | Some a => Return (Some (inr (inl (inl (inr a)))))
       end
     end
   end.
@@ -499,9 +535,11 @@ Definition seqNum (tbl : list (ByteString * nat))(key : ByteString) :=
        else aux ((k,n)::pre) rest
      end) [] tbl.
 
+(*
 Parameter encodePacket : CPacket -> option (Hash * Cipher * ByteString * nat) -> ByteString.
+*)
 
-Definition readWrite fuel certs keys(_: rets_tls') : t (const_yield _) (const_yield rets_tls') (option unit) :=
+Definition readWrite fuel certs keys(_: rets_tls') : t (const_yield _) (const_yield rets_tls') (option String.string) := Eval unfold parse in
   pipe (doHandshake fuel certs keys) (fun coro : coro_type doHandshake_step =>
   nat_rect_nondep
     (fun _ => Return None)
@@ -513,16 +551,17 @@ Definition readWrite fuel certs keys(_: rets_tls') : t (const_yield _) (const_yi
          r <- resume c $ a;
          match r with
          | inr eo =>
-           bs' <- yield RecvData $ tt & None; (* needed for compiler limitation *)
-             rec (tbl, Some eo, mconcat [bs; bs'], a, c)
+           _ <- yield (inl (inl (inl (inl (inl (inr 1))))));
+(*           _ <- yield GetRandomBytes $ 1; *) (* needed for compiler limitation *)
+             rec (tbl, Some eo, mconcat [bs], a, c)
          | inl (inr (pkt,o)) =>
            match o with
            | None =>
-             a' <- yield SendData $ (encodePacket pkt None);
+             a' <- yield SendData $ (pkt, None);
                rec (tbl, None, bs, a', c)
            | Some sec =>
              let (tbl', num) := seqNum tbl (snd sec) in
-             a' <- yield SendData $ (encodePacket pkt (Some (sec, num)));
+             a' <- yield SendData $ (pkt, (Some (sec, num)));
                rec (tbl', None, bs, a', c)
            end
          | _ =>
@@ -530,27 +569,33 @@ Definition readWrite fuel certs keys(_: rets_tls') : t (const_yield _) (const_yi
              rec (tbl, None, bs, a', c)
          end
        | Some o =>
-         bs' <- yield RecvData $ tt & None;
-           if Nat.ltb (Blength bs' + Blength bs) 5 then
+         if Nat.ltb (Blength bs) 5 then
+           bs' <- yield RecvData $ tt & Some "fail";
+             rec (tbl, Some o, mconcat [bs; bs'], a, c)
+         else
+           let p := Bsplit 5 bs in
+           let header := decodeHeader (fst p) in
+           if Nat.ltb (Blength (snd p)) (hdReadLen header) then
+             bs' <- yield RecvData $ tt & Some "fail";
              rec (tbl, Some o, mconcat [bs; bs'], a, c)
            else
-             let p := Bsplit (mconcat [bs; bs']) 5 in
-             let header := decodeHeader (fst p) in
-             if Nat.ltb (Blength (snd p)) (hdReadLen header) then
-               rec (tbl, Some o, mconcat [bs; bs'], a, c)
-             else
-               let p' := Bsplit (snd p) (hdReadLen header) in
-               let o' :=
-                   match snd o with
-                   | None => (tbl, None)
-                   | Some sec =>
-                     let p := seqNum tbl (snd sec) in
-                     (fst p, Some (sec, snd p))
-                   end
-               in
-               a' <<- parse header (fst p') (fst o) (snd o');
-               a'' <~ ifSome a' else Return None;
-               rec (fst o', None, snd p', a'', c)
+             let p' := Bsplit (hdReadLen header) (snd p) in
+             let o' :=
+                 match snd o with
+                 | None => (tbl, None)
+                 | Some sec =>
+                   let p := seqNum tbl (snd sec) in
+                   (fst p, Some (sec, snd p))
+                 end
+             in
+             a' <<- parse header (fst p') (fst o) (snd o');
+               match a' with
+               | Some (inr a'') =>
+                 _ <- yield (inl (inl (inl (inl (inl (inr 1))))));
+                 rec (fst o', None, snd p', a'', c)
+               | Some (inl err) => Return (Some err)
+               | None => Return None
+                 end
      end
      end)
     fuel ([], None,empty, inl (inr tt), coro)).
@@ -573,95 +618,7 @@ Definition readWrite_derive :
                 { init | @equiv_coro _ _ _ _ _ state step init (readWrite fuel certs priv) } } }.
 Proof.
   do 3 eexists.
-(*
   unshelve derive (tt,fuel,certs,priv); exact inhabitant.
-*)
-  lazymatch goal with
-    |- equiv_coro _ ?init ?x =>
-    let u := open_constr:(inl (tt,fuel,certs,priv)) in
-    unify init u
-  end;
-  econstructor;
-  econstructor;
-  intros; [|dest_step].
-
-  assert (readWrite fuel certs priv r = ltac:(let x' := eval red in (readWrite fuel certs priv r) in
-                              let x'' := coro_to_state x' in exact x'')).
-  (*  unfold readWrite, pipe, option_branch; repeat mid_eq_core.*)
-  unfold readWrite, pipe, option_branch.
-  unfold sum_merge in *.
-  repeat (congruence ||
-          (repeat match goal with
-             | H : _ |- _ => apply H
-             end((simpl in *; congruence) || solve [eauto with foldable equivc] || solve [simpl; eauto])) || mid_eq_core).
-
-  (*
-  lazymatch goal with
-  | |- @nat_rect_nondep ?A ?f0 ?f ?k (?a0,?l) = nat_rect_nondep _ ?f' _ (_,?l') =>
-    let x := fresh in
-    set (x := f);
-      let y := fresh in
-      set (y := f');
-        lazymatch type of f0 with
-        | context [ @coro_type _ _ _ ?state ?step ] =>
-            cut
-             (GenForall2
-                (fun (coro : coro_type step) (st : state) =>
-                 equiv_coro step st coro) l l');
-             [ generalize l, l', a0; subst x; subst y;
-             induction k; intros;
-             lazymatch goal with
-             | |- nat_rect_nondep ?f ?f0 _ _ = nat_rect_nondep ?f' ?f0' _ _ =>
-                   let tmp := fresh in
-                   set (tmp := f);
-                    (let tmp' := fresh in
-                     set (tmp' := f');
-                      (let tmp0 := fresh in
-                       set (tmp0 := f0);
-                        (let tmp0' := fresh in
-                         set (tmp0' := f0'); simpl nat_rect_nondep; subst tmp;
-                          subst tmp'; subst tmp0; subst tmp0'; 
-                          cbv beta)))
-             | _ => idtac
-             end
-             | unfold GenForall2;
-                simpl; eauto with equivc ]
-        | ?T => idtac T
-        end
-  end.
-  apply eq_refl.
-  unfold sum_merge in *.
-*)
-  rewrite H.
-
-  unfold parse, option_branch, sum_merge, step_state.
-  clear H.
-
-  derive_core open_constr:(fun a => inr a) (tt,fuel,certs,priv,r).
-  all: try (let ptr := next_ptr open_constr:(fun _x => _x) in
-  lazymatch goal with
-    |- equiv' ?step _ _ (Return ?r) _ =>
-    (eapply (Equiv'Return step _ (ptr None));
-      simpl;
-      split;
-      lazymatch goal with
-        |- _ ?x = _ =>
-        pattern_rhs x;
-          apply eq_refl
-      | _ => apply eq_refl
-      end)
-    || (eapply (Equiv'Return step);
-      simpl;
-      split;
-      lazymatch goal with
-        |- _ ?x = _ =>
-        pattern_rhs x;
-          apply eq_refl
-      | _ => apply eq_refl
-      end)
-  end).
-  Grab Existential Variables.
-  all: exact inhabitant.
 Time Defined.
 
 Inductive eff_conn := newAccept | perform | receive.
@@ -796,9 +753,10 @@ Extract Inductive CHandshake => "I.Handshake13" ["I.ClientHello13" "I.ServerHell
 Extract Inductive CPacket => "I.Packet13" ["I.Handshake13" "I.ChangeCipherSpec13" "I.AppData13"].
 Extract Inductive Header => "I.Header" ["I.Header"].
 Extract Inductive CServerRandom => "I.ServerRandom" ["I.ServerRandom"].
+Extract Inductive CClientRandom => "I.ClientRandom" ["I.ClientRandom"].
 Extract Constant ProtocolType => "I.ProtocolType".
 Extract Constant decodeRecord => "Helper.decodeRecord".
-Extract Constant decodeHeader => "I.decodeHeader".
+Extract Constant decodeHeader => "\bs -> case I.decodeHeader bs of { Prelude.Right x -> x }".
 Extract Constant Certificate => "X.Certificate".
 Extract Constant CertificateChain => "X.CertificateChain".
 Extract Constant getCertificates => "\cch -> case cch of { X.CertificateChain certs -> Prelude.map X.getCertificate certs }".
@@ -828,7 +786,7 @@ Extract Constant serverHello13 => "(\b -> I.ServerHello13 (I.ServerRandom {I.unS
 Extract Constant extension_KeyShare =>
 "(\exts -> case Helper.extensionLookup I.extensionID_KeyShare exts GHC.Base.>>= I.extensionDecode I.MsgTClientHello of { GHC.Base.Just (I.KeyShareClientHello kses) -> GHC.Base.return kses})".
 Extract Constant serverGroups => "Helper.serverGroups".
-Extract Constant changeCipherSpec => "I.ChangeCipherSpec13".
+Extract Constant changeCipherSpec => "\p -> case p of { I.ChangeCipherSpec13 -> GHC.Base.Just (); _ -> GHC.Base.Nothing }".
 Extract Constant extension_SignatureAlgorithms =>
 "(\exts -> case Helper.extensionLookup I.extensionID_SignatureAlgorithms exts GHC.Base.>>= I.extensionDecode I.MsgTClientHello of { GHC.Base.Just (I.SignatureAlgorithms sas) -> sas })".
 Extract Constant defaultCertChain => "Helper.defaultCertChain".
@@ -848,7 +806,7 @@ Extract Constant encryptedExtensions13 => "I.EncryptedExtensions13".
 Extract Constant sniExt => "Helper.sniExt".
 Extract Constant CryptoError => "I.CryptoError".
 Extract Constant encodeGroupPublic => "I.encodeGroupPublic".
-Extract Constant decodeGroupPublic => "I.decodeGroupPublic".
+Extract Constant decodeGroupPublic => "\g bs -> case I.decodeGroupPublic g bs of { Prelude.Right a -> GHC.Base.Just a; _ -> GHC.Base.Nothing }".
 Extract Constant ba_convert => "BA.convert".
 Extract Constant hashDigestSize => "I.hashDigestSize".
 Extract Constant Word8 => "Data.Word8.Word8".
@@ -869,6 +827,8 @@ Extract Constant certPubKey => "X.certPubKey".
 Extract Constant Word32 => "Data.Word.Word32".
 Extract Constant Signature => "I.Signature".
 Extract Constant KeyUpdate => "I.KeyUpdate".
+Extract Constant Bsplit => "B.splitAt".
+Extract Constant Blength => "B.length".
 
 (*
 Extract Constant extension_KeyShare => "Helper.extension_KeyShare".

@@ -31,7 +31,7 @@ main = withSocketsDo $ do
       sock <- socket AF_INET Stream 0
       bind sock (SockAddrInet 8001 iNADDR_ANY)  
       listen sock 2
-      forkIO (core [] (Left ((((),cert), priv), 1000)) NewAccept (unsafeCoerce ()) newAccepts received)
+      forkIO (core [] (Left (((((),1000), 1000), cert), priv)) NewAccept (unsafeCoerce ()) newAccepts received)
       forever $ do
         (s,a) <- accept sock
         modifyIORef newAccepts ((s,show a):)
@@ -44,9 +44,8 @@ main = withSocketsDo $ do
 core sock x ef (r::Any) newAccepts received = do
   case main_loop_step x ef r of
     Right res -> do
-      b <- readIORef test
-      if b then putStrLn "!" else putStrLn "."
-      putStrLn "Done"
+      print res
+      putStrLn "\nDone"
       forM_ sock (\(_,s) -> close s)
     Left (next, Nothing) -> core sock next NewAccept (unsafeCoerce ()) newAccepts received
     Left (next, Just (ExistT e a)) ->
@@ -64,7 +63,6 @@ core sock x ef (r::Any) newAccepts received = do
           case r of
             Just (adr,p) ->
               case p of
-                Left (Left Nothing) -> putStrLn $ "received NONE" ++ show adr
                 _ -> putStrLn $ "received " ++ show adr
             _ -> return ()
           core sock next Receive (unsafeCoerce r) newAccepts received
@@ -72,17 +70,17 @@ core sock x ef (r::Any) newAccepts received = do
           let (adr,ea) = unsafeCoerce a :: (String, Args_tls')
           putStrLn $ "perform " ++ show ea ++ show adr
           case ea of
-            (Right a') -> do
+            (Left (Left (Left (Left (Right a'))))) -> do
               putStrLn "RecvData"
               let ms = lookup adr sock
               case ms of
                 Just s -> do
-                  forkIO $ recvBytes s a' >>= \ch -> putMVar received (adr,Right ch)
+                  forkIO $ SB.recv s 65536 >>= \ch -> putMVar received (adr,Left (Left (Right ch)))
                   return ()
                 Nothing -> error "no socket"
-            (Left (Left (Left (Left a')))) ->
-              putStrLn "GetRandomBytes" >> getRandomBytes a' >>= \(v::B.ByteString) -> forkIO (putMVar received (adr,Right v)) >> return ()
-            (Left (Left (Left (Right a')))) ->
+            (Left (Left (Left (Left (Left (Right a')))))) ->
+              putStrLn "GetRandomBytes" >> getRandomBytes a' >>= \(v::B.ByteString) -> forkIO (putMVar received (adr, Left (Left (Right v)))) >> return ()
+            (Left (Left (Left (Left (Left (Left (a'))))))) ->
               case lookup adr sock of
                 Just s -> do
                   putStrLn "SendPacket"
@@ -94,12 +92,12 @@ core sock x ef (r::Any) newAccepts received = do
                   bs <- encodePacket13 (pkt,m)
                   case bs of
                     Right b -> do
-                      forkIO $ SB.sendAll s b >> putMVar received (adr,Right encoded)
+                      forkIO $ SB.sendAll s b >> putMVar received (adr, Left (Left (Right encoded)))
                       return ()
+            (Left (Left (Left (Right a')))) ->
+              I.groupGetPubShared a' >>= \p -> forkIO (putMVar received (adr,(Left (Left (Left (Left p)))))) >> return ()
             (Left (Left (Right a'))) ->
-              I.groupGetPubShared a' >>= \p -> forkIO (putMVar received (adr,(Left (Left p)))) >> return ()
-            (Left (Right a')) ->
-              makeCertVerify a' >>= \c -> forkIO (putMVar received (adr,(Left $ Right c))) >> return ()
+              makeCertVerify a' >>= \c -> forkIO (putMVar received (adr,(Left $ Left $ Left $ Right c))) >> return ()
           core sock next Perform (unsafeCoerce ()) newAccepts received
 
 recvBytes :: Socket -> Int -> IO B.ByteString
