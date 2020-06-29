@@ -11,7 +11,6 @@ encodePacket13 :: (Packet13, Maybe (((Hash,Cipher),B.ByteString), Int)) -> IO (E
 encodePacket13 (pkt,encrypt) = do
     let pt = contentType pkt
         mkRecord bs = Record pt TLS12 (fragmentPlaintext bs)
-        frags = packetToFragments 16384 pkt
         records = map mkRecord $ packetToFragments 16384 pkt
     fmap B.concat <$> forEitherM records (encodeRecord encrypt)
 

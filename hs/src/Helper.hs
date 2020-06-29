@@ -21,6 +21,10 @@ import Encrypt (newRecordOptions)
 sniExt :: ExtensionRaw
 sniExt = ExtensionRaw extensionID_ServerName ""
 
+packet2tinfo :: Packet13 -> Maybe TLS13TicketInfo
+packet2tinfo (Handshake13 [NewSessionTicket13 life ageadd nonce sessid exts]) =
+  Just $ TLS13TicketInfo { lifetime = life, ageAdd = ageadd, txrxTime = (fromIntegral 1000), estimatedRTT = Nothing }
+
 makeCertVerify :: (((PubKey,PrivKey), (HashAndSignatureAlgorithm)), B.ByteString) -> IO Handshake13
 makeCertVerify (((pub, priv), (h,sig)), msg) = do
   let params = signatureParams pub (Just (h,sig))

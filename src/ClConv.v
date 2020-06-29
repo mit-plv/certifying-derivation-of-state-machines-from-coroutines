@@ -211,7 +211,7 @@ Definition dmmy (A:Set)(_:A) := True.
 
 Ltac free_var body vars :=
   lazymatch goal with
-    _ : dummy ?env |- _ =>
+    _ : dmmy ?env |- _ =>
     let rec aux vars :=
         lazymatch vars with
         | env => env
@@ -703,7 +703,7 @@ Ltac dest_step :=
       end;
       (apply equal_f_dep || apply equal_f);
       try unfold const;
-      simpl;
+      cbv beta iota;
       repeat (dest_sum; unfold sum_merge; cbv beta iota);
       unify_fun
   | |- _ ?r = _ => repeat (dest_sum; unfold sum_merge; cbv beta iota); unify_fun
@@ -837,6 +837,7 @@ Ltac derive_core ptr env :=
   st_op_to_ev;[
   lazymatch goal with
     |- equiv' _ _ _ ?prog _ =>
+    idtac "foo";
     lazymatch prog with
     | @Eff _ ?args ?rets ?C ?e _ _ =>
       let fv := free_var prog env in
@@ -926,7 +927,10 @@ Ltac derive_core ptr env :=
       derive_core ptr (env,_a,_b)
     | nat_rect_nondep _ _ _ _ =>
       (solve [repeat match goal with
-                     | H : ?p |- _ => apply H
+                     | H : ?p |- _ =>
+                       match type of p with
+                       | Prop => apply H
+                       end
                      end])
       ||
       (eapply (derive_nat_rect _ _ (fun a b => _) (fun a => _) (fun a => _));
@@ -1422,7 +1426,7 @@ Ltac generalize_and_ind :=
       set (y0 := f0');
       cut (GenForall2 (fun (coro : coro_type step) (st : state) => equiv_coro step st coro) l l');
       [ generalize l l' a; subst x; subst x0; subst y; subst y0
-       |unfold GenForall2; solve [simpl; eauto with equivc]];
+       |unfold GenForall2; (solve [simpl; eauto with equivc] || (eexists; split; [reflexivity| solve [simpl; eauto with equivc]]))];
       induction k; intros;
       lazymatch goal with
         |- nat_rect_nondep ?f ?f0 _ _ = nat_rect_nondep ?f' ?f0' _ _ =>

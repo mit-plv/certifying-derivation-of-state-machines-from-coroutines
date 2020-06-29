@@ -26,12 +26,13 @@ main = withSocketsDo $ do
   ecred <- credentialLoadX509 (args !! 0) (args !! 1)
   newAccepts <- newIORef []
   received <- newEmptyMVar
+  sessdata <- newMVar []
   case ecred of
     Right (cert,priv) -> do
       sock <- socket AF_INET Stream 0
       bind sock (SockAddrInet 8001 iNADDR_ANY)  
       listen sock 2
-      forkIO (core [] (Left (((((),1000), 1000), cert), priv)) NewAccept (unsafeCoerce ()) newAccepts received)
+      forkIO (core [] (Left (((((),1000), 1000), cert), priv)) NewAccept (unsafeCoerce ()) newAccepts received sessdata)
       forever $ do
         (s,a) <- accept sock
         modifyIORef newAccepts ((s,show a):)
@@ -41,23 +42,23 @@ main = withSocketsDo $ do
     Left s ->
       putStrLn s
 
-core sock x ef (r::Any) newAccepts received = do
+core sock x ef (r::Any) newAccepts received sessdata = do
   case main_loop_step x ef r of
     Right res -> do
       print res
       putStrLn "\nDone"
       forM_ sock (\(_,s) -> close s)
-    Left (next, Nothing) -> core sock next NewAccept (unsafeCoerce ()) newAccepts received
+    Left (next, Nothing) -> core sock next NewAccept (unsafeCoerce ()) newAccepts received sessdata
     Left (next, Just (ExistT e a)) ->
       case e of
         NewAccept -> do
           l <- readIORef newAccepts
           case l of
-            [] -> threadDelay 100000 >> core sock next NewAccept (unsafeCoerce Nothing) newAccepts received
+            [] -> threadDelay 100000 >> core sock next NewAccept (unsafeCoerce Nothing) newAccepts received sessdata
             (s,adr):l' -> do
               writeIORef newAccepts l'
               putStrLn $ "accepted" ++ show adr
-              core ((adr,s):sock) next NewAccept (unsafeCoerce (Just adr)) newAccepts received
+              core ((adr,s):sock) next NewAccept (unsafeCoerce (Just adr)) newAccepts received sessdata
         Receive -> do
           r <- tryTakeMVar received
           case r of
@@ -65,7 +66,7 @@ core sock x ef (r::Any) newAccepts received = do
               case p of
                 _ -> putStrLn $ "received " ++ show adr
             _ -> return ()
-          core sock next Receive (unsafeCoerce r) newAccepts received
+          core sock next Receive (unsafeCoerce r) newAccepts received sessdata
         Perform -> do
           let (adr,ea) = unsafeCoerce a :: (String, Args_tls')
           putStrLn $ "perform " ++ show ea ++ show adr
@@ -80,7 +81,7 @@ core sock x ef (r::Any) newAccepts received = do
                 Nothing -> error "no socket"
             (Left (Left (Left (Left (Left (Right a')))))) ->
               putStrLn "GetRandomBytes" >> getRandomBytes a' >>= \(v::B.ByteString) -> forkIO (putMVar received (adr, Left (Left (Right v)))) >> return ()
-            (Left (Left (Left (Left (Left (Left (a'))))))) ->
+            (Left (Left (Left (Left (Left (Left (Right a'))))))) ->
               case lookup adr sock of
                 Just s -> do
                   putStrLn "SendPacket"
@@ -91,14 +92,31 @@ core sock x ef (r::Any) newAccepts received = do
                           I.ChangeCipherSpec13 -> I.encodeChangeCipherSpec
                   bs <- encodePacket13 (pkt,m)
                   case bs of
-                    Right b -> do
-                      forkIO $ SB.sendAll s b >> putMVar received (adr, Left (Left (Right encoded)))
-                      return ()
+                    Right b ->
+                      case pkt of
+                        I.Handshake13 [I.NewSessionTicket13 _ _ _ _ _] -> do
+                          forkIO $ SB.sendAll s b >> close s
+                          return ()
+                        _ -> do
+                          forkIO $ SB.sendAll s b >> putMVar received (adr, Left (Left (Right encoded)))
+                          return ()
             (Left (Left (Left (Right a')))) ->
-              I.groupGetPubShared a' >>= \p -> forkIO (putMVar received (adr,(Left (Left (Left (Left p)))))) >> return ()
+              I.groupGetPubShared a' >>= \p -> forkIO (putMVar received (adr,(Left (Left (Left (Left $ Right p)))))) >> return ()
             (Left (Left (Right a'))) ->
               makeCertVerify a' >>= \c -> forkIO (putMVar received (adr,(Left $ Left $ Left $ Right c))) >> return ()
-          core sock next Perform (unsafeCoerce ()) newAccepts received
+            (Left (Left (Left (Left (Left (Left (Left (Right a')))))))) -> do
+              putStrLn "SessionResume"
+              r <- tryTakeMVar sessdata 
+              case r of
+                Just db -> case lookup a' db of
+                              Just sess -> forkIO (putMVar received (adr, Left $ Left $ Left $ Left $ Left $ Just sess)) >> return ()
+                              Nothing -> forkIO (putMVar received (adr, Left $ Left $ Left $ Left $ Left Nothing)) >> return ()
+            (Left (Left (Left (Left (Left (Left (Left (Left a')))))))) -> do
+              db <- takeMVar sessdata
+              putMVar sessdata (("TestSession", a'):db)
+              forkIO (putMVar received (adr, Left $ Right ())) >> return ()
+
+          core sock next Perform (unsafeCoerce ()) newAccepts received sessdata
 
 recvBytes :: Socket -> Int -> IO B.ByteString
 recvBytes sock n = B.concat <$> loop n
