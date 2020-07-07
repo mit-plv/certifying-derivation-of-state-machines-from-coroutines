@@ -44,20 +44,73 @@ Fixpoint findKeyShare ks gs :=
 Definition intersect (xs ys : list Group) :=
   filter (fun x => if in_dec Group_eq_dec x ys then true else false) xs.
 
+Parameter Word8 : Set.
+
+Inductive HashAlgorithm :=
+  HashNone          
+| HashMD5
+| HashSHA1
+| HashSHA224
+| HashSHA256
+| HashSHA384
+| HashSHA512
+| HashIntrinsic
+| HashOther : Word8 -> HashAlgorithm.
+
+Inductive SignatureAlgorithm :=
+  SignatureAnonymous
+| SignatureRSA
+| SignatureDSS
+| SignatureECDSA
+| SignatureRSApssRSAeSHA256
+| SignatureRSApssRSAeSHA384
+| SignatureRSApssRSAeSHA512
+| SignatureEd25519
+| SignatureEd448
+| SignatureRSApsspssSHA256
+| SignatureRSApsspssSHA384
+| SignatureRSApsspssSHA512
+| SignatureOther : Word8 -> SignatureAlgorithm.
+
+Parameter Word8_beq : Word8 -> Word8 -> bool.
+
+Definition HashAndSignatureAlgorithm := HashAlgorithm * SignatureAlgorithm.
+
+Definition isHashSignatureValid '(h,sig) :=
+  match h with
+  | HashIntrinsic =>
+    match sig with
+    | SignatureRSApssRSAeSHA256
+    | SignatureRSApssRSAeSHA384
+    | SignatureRSApssRSAeSHA512
+    | SignatureEd25519
+    | SignatureEd448
+    | SignatureRSApsspssSHA256
+    | SignatureRSApsspssSHA384
+    | SignatureRSApsspssSHA512 =>
+      true
+    | _ => false
+    end
+  | HashSHA256
+  | HashSHA384
+  | HashSHA512 =>
+    match sig with
+    | SignatureECDSA => true
+    | _ => false
+    end
+  | _ => false
+  end.
+
 Parameter extension_KeyShare : list ExtensionRaw -> option (list KeyShare).
-Parameter extension_NegotiatedGroups : list ExtensionRaw -> list Group.
+Parameter extension_NegotiatedGroups : list ExtensionRaw -> option (list Group).
 Parameter Word32 : Set.
 Parameter PublicKey PrivateKey : Set.
 Parameter GroupPublic GroupKey : Set.
-Parameter Hash Cipher HashAndSignatureAlgorithm : Set.
+Parameter Hash Cipher : Set.
 Parameter KeyUpdate : Set.
 Parameter Certificate CertificateChain : Set.
 Parameter Signature : Set.
 
-(*
-Definition CHandshake :=
-  ClientHelloMsg + ByteString.
- *)
 
 Inductive CServerRandom := SR : ByteString -> CServerRandom.
 Inductive CClientRandom := CRn : ByteString -> CClientRandom.
@@ -76,11 +129,50 @@ Inductive CHandshake :=
 (*
 Definition  CPacket :=
   list CHandshake + unit + ByteString.
-*)
+ *)
+
+Inductive AlertLevel := Alert_Warning | Alert_Fatal.
+
+Inductive AlertDescription :=
+| CloseNotify
+| UnexpectedMessage
+| BadRecordMac
+| DecryptionFailed
+| RecordOverflow
+| DecompressionFailure
+| HandshakeFailure
+| BadCertificate
+| UnsupportedCertificate
+| CertificateRevoked
+| CertificateExpired
+| CertificateUnknown
+| IllegalParameter
+| UnknownCa
+| AccessDenied
+| DecodeError
+| DecryptError
+| ExportRestriction
+| ProtocolVersion
+| InsufficientSecurity
+| InternalError
+| InappropriateFallback
+| UserCanceled
+| NoRenegotiation
+| MissingExtension
+| UnsupportedExtension
+| CertificateUnobtainable
+| UnrecognizedName
+| BadCertificateStatusResponse
+| BadCertificateHashValue
+| UnknownPskIdentity
+| CertificateRequired
+| NoApplicationProtocol.
+
 Inductive CPacket :=
 | PHandshake : list CHandshake -> CPacket
+| PAlert : list (AlertLevel * AlertDescription) -> CPacket
 | PChangeCipherSpec : CPacket
-| PAppData13 : ByteString -> CPacket.
+| PAppData : ByteString -> CPacket.
 
 Record ClientHelloMsg :=
   { chVersion : Version;
@@ -103,6 +195,12 @@ Definition finished (h : CHandshake) :=
   | _ => None
   end.
 
+Definition alert (h : CPacket) :=
+  match h with
+  | PAlert a => Some a
+  | _ => None
+  end.
+
 Definition handshake (p : CPacket) :=
   match p with
   | PHandshake [h] => Some h
@@ -117,7 +215,7 @@ Definition changeCipherSpec (p : CPacket) :=
 
 Definition appData (p : CPacket) :=
   match p with
-  | PAppData13 dat => Some dat
+  | PAppData dat => Some dat
   | _ => None
   end.
 
@@ -135,10 +233,6 @@ Inductive eff_tls :=
 | groupGetPubShared : GroupPublic -> eff_tls
 | makeCertVerify : PublicKey * PrivateKey * HashAndSignatureAlgorithm * ByteString -> eff_tls.
 *)
-
-Inductive eff_tls := recvData | getRandomBytes | sendPacket | groupGetPubShared | makeCertVerify.
-
-Parameter Packet13 Handshake13 : Set.
 
 Definition option_beq {A} (A_beq : A -> A -> bool) o1 o2 :=
   match o1, o2 with
@@ -165,21 +259,15 @@ Parameter extensionEncode_SupportedVersions : Version -> ByteString.
 Parameter TLS13 : Version.
 Parameter extensionRaw_KeyShare : ByteString -> ExtensionRaw.
 Parameter extensionRaw_SupportedVersions : ByteString -> ExtensionRaw.
-Parameter handshake13 : list Handshake13 -> Packet13.
-Parameter serverHello13 : ByteString -> Session -> CipherID -> list ExtensionRaw -> Handshake13.
-(*Parameter changeCipherSpec : Packet13.*)
-Parameter extension_SignatureAlgorithms : list ExtensionRaw -> list (HashAndSignatureAlgorithm).
+Parameter extension_SignatureAlgorithms : list ExtensionRaw -> option (list (HashAndSignatureAlgorithm)).
 
 
 Parameter getCertificates : CertificateChain -> list Certificate.
 Parameter defaultCertChain : PublicKey -> CertificateChain.
-Parameter certificate13 : ByteString -> CertificateChain -> list (list ExtensionRaw) -> Handshake13.
 Parameter empty : ByteString.
 Parameter ciphersuite_default : list Cipher.
 Parameter hashWith : Hash -> list ByteString -> ByteString.
-Parameter encryptedExtensions13 : list ExtensionRaw -> Handshake13.
 Parameter sniExt : ExtensionRaw.
-Parameter appData13 : ByteString -> Packet13.
 
 Parameter encodeEncryptedExt : list ExtensionRaw -> ByteString.
 Parameter CryptoError : Set.
@@ -187,13 +275,12 @@ Parameter encodeGroupPublic : GroupPublic -> ByteString.
 Parameter decodeGroupPublic : Group -> ByteString -> option GroupPublic.
 Parameter ba_convert : GroupKey -> ByteString.
 Parameter hashDigestSize : Hash -> nat.
-Parameter Word8 : Set.
+
 Parameter b_replicate : nat -> Word8 -> ByteString.
 Parameter w0 : Word8.
 Parameter hkdfExtract : Hash -> ByteString -> ByteString -> ByteString.
 Parameter hkdfExpandLabel : Hash -> ByteString -> ByteString -> ByteString -> nat -> ByteString.
 Parameter s2b : String.string -> ByteString.
-Parameter finished13 : ByteString -> Handshake13.
 Parameter hmac : Hash -> ByteString -> ByteString -> ByteString.
 
 Fixpoint inb {A} (eqbA: A -> A -> bool) x l :=
@@ -245,32 +332,20 @@ Fixpoint decideCredInfo'
       decideCredInfo' priv hashSig rest
   end.
 
-Fixpoint decideCredInfo
+Definition decideCredInfo
          (priv : PrivateKey)
          (certs : list Certificate)
          (hashSigs : list (HashAndSignatureAlgorithm)) :=
-  match hashSigs with
-  | [] => None
-  | hashSig::rest =>
-    match decideCredInfo' priv hashSig certs with
-    | None => decideCredInfo priv certs rest
-    | Some res => Some res
-    end
-  end.
+  (fix aux hss :=
+     match hss with
+     | [] => None
+     | hs::rest =>
+       match decideCredInfo' priv hs certs with
+       | None => aux rest
+       | Some res => Some res
+       end
+     end) (filter isHashSignatureValid hashSigs).
 
-(*
-Instance ByteString_inhabitant : Inhabit ByteString :=
-  { inhabitant := empty }.
-
-Parameter hashdummy : Hash.
-Instance Hash_inhabitant : Inhabit Hash :=
-  { inhabitant := hashdummy }.
-
-Parameter session : Session.
-Instance clientHelloMSg_inhabitant : Inhabit ClientHelloMsg :=
-  { inhabitant := {| chSession := session; chExtension := []; chCiphers := [] |} }.
-
-*)
 Definition LF : String.string := String.String (Coq.Strings.Ascii.Ascii false true false true false false false false) "".
 Definition CR : String.string := String.String (Coq.Strings.Ascii.Ascii true false true true false false false false) "".
 
@@ -285,9 +360,19 @@ Fixpoint replicate {A:Set} n (a:A) :=
   | S n' => a::replicate n' a
   end.
 
-Parameter TicketInfo : Set.
-Parameter CompressionID : Set.
+Parameter Word64 : Set.
+
 Inductive SessionFlag := SessionEMS : SessionFlag.
+
+Record TicketInfo :=
+  { lifetime : Word32;
+    ageAdd : Word32;
+    txrxTime : Word64;
+    estimatedRTT : option Word64
+  }.
+
+Parameter CompressionID : Set.
+Parameter dummyCompressionID : CompressionID.
 
 Record SessionData :=
   { sessionVersion : Version;
@@ -302,73 +387,344 @@ Record SessionData :=
     sessionFlags : list SessionFlag
   }.
 
-Parameter dummyCompressionID : CompressionID.
+(*
+Definition args_tls :=
+  String.string * SessionData (* SetPSK *)
+  + String.string (* SessionResume *)
+  + unit (* GetCurrentTime *)
+  + unit (* Close *)
+  + CPacket * option (Hash * Cipher * ByteString * nat) (* SendPacket *)
+  + nat (* GetRandomBytes *)
+  + unit (* RecvData *)
+  + GroupPublic (* GroupGetPubShared *)
+  + PublicKey * PrivateKey * HashAndSignatureAlgorithm * ByteString (* MakeCertVerify *)
+  + Hash * Cipher * ByteString * bool (* SetSecret *)
+  + CPacket (* Send *)
+  + (unit + unit + unit + unit). (* Recv *)
+ *)
 
-Definition args_tls' :=
-  String.string * SessionData + String.string + CPacket * option (Hash * Cipher * ByteString * nat) + nat + unit + GroupPublic + PublicKey * PrivateKey * HashAndSignatureAlgorithm * ByteString + CPacket * option (Hash * Cipher * ByteString) + (unit + unit + unit + unit) * option (Hash * Cipher * ByteString).
+Inductive args_tls :=
+| setPSK : String.string * SessionData -> args_tls
+| sessionResume : String.string -> args_tls
+| getCurrentTime : unit -> args_tls
+| close : unit -> args_tls
+| sendData : CPacket * option (Hash * Cipher * ByteString * nat) -> args_tls
+| getRandomBytes : nat -> args_tls
+| recvData : unit -> args_tls
+| groupGetPubShared : GroupPublic -> args_tls
+| makeCertVerify : PublicKey * PrivateKey * HashAndSignatureAlgorithm * ByteString -> args_tls
+| setSecret : Hash * Cipher * ByteString * bool -> args_tls
+| sendPacket : CPacket -> args_tls
+| recvPacket : unit + unit + unit + unit -> args_tls.
 
-Definition rets_tls' :=
-   option SessionData + option (GroupPublic * GroupKey) + CHandshake + ByteString + unit + ByteString * ClientHelloMsg.
+Inductive rets_tls :=
+| RetAlert : AlertLevel * AlertDescription -> rets_tls
+| FromSetPSK : rets_tls
+| FromGetCurrentTime : Word64 -> rets_tls
+| FromSessionResume : option SessionData -> rets_tls
+| FromSetSecret : rets_tls
+| FromSendPacket : ByteString -> rets_tls
+| FromGetRandomBytes : ByteString -> rets_tls
+| FromMakeCertVerify : CHandshake -> rets_tls
+| FromGroupGetPubShared : option (GroupPublic * GroupKey) -> rets_tls
+| FromRecvClientHello : ByteString * ClientHelloMsg -> rets_tls
+| FromRecvFinished : ByteString -> rets_tls
+| FromRecvCCS : rets_tls
+| FromRecvAppData : ByteString -> rets_tls
+| FromRecvData : ByteString -> rets_tls.
+
+Definition retAlert p :=
+  match p with
+  | RetAlert a => Some a
+  | _ => None
+  end.
+
+Definition fromSetSecret p :=
+  match p with
+  | FromSetSecret => Some tt
+  | _ => None
+  end.
+
+Definition fromSetPSK p :=
+  match p with
+  | FromSetPSK => Some tt
+  | _ => None
+  end.
+
+Definition fromSessionResume p :=
+  match p with
+  | FromSessionResume a => Some a
+  | _ => None
+  end.
+
+Definition fromGetCurrentTime p :=
+  match p with
+  | FromGetCurrentTime a => Some a
+  | _ => None
+  end.
+
+Definition fromSendPacket p :=
+  match p with
+  | FromSendPacket a => Some a
+  | _ => None
+  end.
+
+Definition fromGetRandomBytes p :=
+  match p with
+  | FromGetRandomBytes a => Some a
+  | _ => None
+  end.
+
+Definition fromMakeCertVerify p :=
+  match p with
+  | FromMakeCertVerify a => Some a
+  | _ => None
+  end.
+
+Definition fromGroupGetPubShared p :=
+  match p with
+  | FromGroupGetPubShared a => Some a
+  | _ => None
+  end.
+
+Definition fromRecvClientHello p :=
+  match p with
+  | FromRecvClientHello a => Some a
+  | _ => None
+  end.
+
+Definition fromRecvFinished p :=
+  match p with
+  | FromRecvFinished a => Some a
+  | _ => None
+  end.
+
+Definition fromRecvCCS p :=
+  match p with
+  | FromRecvCCS => Some tt
+  | _ => None
+  end.
+
+Definition fromRecvAppData p :=
+  match p with
+  | FromRecvAppData a => Some a
+  | _ => None
+  end.
+
+Definition fromRecvData p :=
+  match p with
+  | FromRecvData a => Some a
+  | _ => None
+  end.
+
+(*
+Definition rets_tls :=
+  option SessionData
+  + option (GroupPublic * GroupKey)
+  + CHandshake
+  + ByteString
+  + unit
+  + (AlertLevel * AlertDescription + ByteString * ClientHelloMsg).
+ *)
 
 Notation "r <- 'yield' 'SetPSK' $ a ; p" :=
-  (Eff yield (inl (inl (inl (inl (inl (inl (inl (inl a))))))))
-       (fun r' => ((fun _ => Return tt) ||| (fun r => p) ||| (fun _ => Return tt)) r'))
+  (Eff yield (setPSK a)
+       (fun r' => option_branch (fun r => p) (Return inhabitant) (fromSetPSK r')))
     (at level 100, right associativity).
-Notation "r <- 'yield' 'SessionResume' $ a & o ; p" :=
-  (Eff yield (inl (inl (inl (inl (inl (inl (inl (inr a))))))))
-       (fun r' => ((fun r => p) ||| (fun _ => Return o) ||| (fun _ => Return o) ||| (fun _ => Return o) ||| (fun _ => Return o) ||| (fun _ => Return o)) r'))
+
+Notation "r <- 'yield' 'SessionResume' $ a ; p" :=
+  (Eff yield (sessionResume a)
+       (fun r' => option_branch (fun r => p) (Return inhabitant) (fromSessionResume r')))
+    (at level 100, right associativity).
+
+Notation "r <- 'yield' 'GetCurrentTime' $ a ; p" :=
+  (Eff yield (getCurrentTime a)
+       (fun r' => option_branch (fun r => p) (Return inhabitant) (fromGetCurrentTime r')))
+       (at level 100, right associativity).
+
+Notation "r <- 'yield' 'Close' $ a ; p" :=
+  (Eff yield (close a)
+       (fun r => p))
     (at level 100, right associativity).
 
 Notation "r <- 'yield' 'RecvClientHello' $ a ; p" :=
-  (Eff yield (inr (inr tt, a))
-       (fun r' => ((fun _ => Return tt) ||| (fun r => p)) r'))
+  (Eff yield (recvPacket (inr a))
+       (fun r' => option_branch
+                    (fun r => p)
+                    (option_branch (fun al => Eff yield (sendPacket (PAlert [al]))
+                                                  (fun _ => Return inhabitant))
+                                   (Return inhabitant) (retAlert r'))
+                    (fromRecvClientHello r')))
        (at level 100, right associativity).
 
-Notation "r <- 'yield' 'RecvData' $ a & o ; p" :=
-  (Eff yield (inl (inl (inl (inl (inr a)))))
-       (fun r' => ((fun _ => Return o) ||| (fun r => p) ||| (fun _ => Return o) ||| (fun _ => Return o)) r'))
+Notation "r <- 'yield' 'RecvData' $ a ; p" :=
+  (Eff yield (recvData a)
+       (fun r' => option_branch
+                    (fun r => p)
+                    (option_branch (fun al => Eff yield (sendPacket (PAlert [al]))
+                                                  (fun _ => Return inhabitant))
+                                   (Return inhabitant) (retAlert r'))
+                    (fromRecvData r')))
     (at level 100, right associativity).
 
 Notation "r <- 'yield' 'RecvFinished' $ a ; p" :=
-  (Eff yield (inr (inl (inl (inr tt)), a))
-       (fun r' => ((fun _ => Return tt) ||| (fun r => p) ||| (fun _ => Return tt) ||| (fun _ => Return tt)) r'))
+  (Eff yield (recvPacket (inl (inl (inr a))))
+       (fun r' => option_branch
+                    (fun r => p)
+                    (option_branch (fun al => Eff yield (sendPacket (PAlert [al]))
+                                                  (fun _ => Return inhabitant))
+                                   (Return inhabitant) (retAlert r'))
+                    (fromRecvFinished r')))
     (at level 100, right associativity).
 
 Notation "r <- 'yield' 'RecvCCS' $ a ; p" :=
-  (Eff yield (inr (inl (inr tt), a))
-       (fun r' => ((fun _ => Return tt) ||| (fun r => p) |||(fun _ => Return tt)) r'))
+  (Eff yield (recvPacket (inl (inr a)))
+       (fun r' => option_branch
+                    (fun r => p)
+                    (option_branch (fun al => Eff yield (sendPacket (PAlert [al]))
+                                                  (fun _ => Return inhabitant))
+                                   (Return inhabitant) (retAlert r'))
+                    (fromRecvCCS r')))
     (at level 100, right associativity).
 
 Notation "r <- 'yield' 'RecvAppData' $ a ; p" :=
-  (Eff yield (inr (inl (inl (inl tt)), a))
-       (fun r' => ((fun _ => Return tt) ||| (fun r => p) ||| (fun _ => Return tt) ||| (fun _ => Return tt)) r'))
+  (Eff yield (recvPacket (inl (inl (inl a))))
+       (fun r' => option_branch
+                    (fun r => p)
+                    (option_branch (fun al => Eff yield (sendPacket (PAlert [al]))
+                                                  (fun _ => Return inhabitant))
+                                   (Return inhabitant) (retAlert r'))
+                    (fromRecvAppData r')))
     (at level 100, right associativity).
 
 Notation "r <- 'yield' 'GetRandomBytes' $ a ; p" :=
-  (Eff yield (inl (inl (inl (inl (inl (inr a))))))
-       (fun r' => ((fun _ => Return tt) ||| (fun r => p) ||| (fun _ => Return tt) ||| (fun _ => Return tt)) r'))
+  (Eff yield (getRandomBytes a)
+       (fun r' => option_branch (fun r => p) (Return inhabitant) (fromGetRandomBytes r')))
     (at level 100, right associativity).
 
-Notation "r <- 'yield' 'SendPacket' $ a & o ; p" :=
-  (Eff yield (inl (inr a))
-       (fun r' => ((fun _ => Return o) ||| (fun r => p) ||| (fun _ => Return o)||| (fun _ => Return o)) r'))
+Notation "r <- 'yield' 'SendPacket' $ a ; p" :=
+  (Eff yield (sendPacket a)
+       (fun r' => option_branch (fun r => p) (Return inhabitant) (fromSendPacket r')))
     (at level 100, right associativity).
 
 Notation "r <- 'yield' 'GroupGetPubShared' $ a ; p" :=
+  (Eff yield (groupGetPubShared a)
+       (fun r' => option_branch (fun r => p) (Return inhabitant) (fromGroupGetPubShared r')))
+    (at level 100, right associativity).
+
+Notation "r <- 'yield' 'MakeCertVerify' $ a ; p" :=
+  (Eff yield (makeCertVerify a)
+       (fun r' => option_branch (fun r => p) (Return inhabitant) (fromMakeCertVerify r')))
+    (at level 100, right associativity).
+
+Notation "r <- 'yield' 'SetSecret' $ a ; p" :=
+  (Eff yield (setSecret a)
+       (fun r' => option_branch (fun r => p) (Return inhabitant) (fromSetSecret r')))
+    (at level 100, right associativity).
+
+(*
+
+Notation "r <- 'yield' 'SetPSK' $ a ; p" :=
+  (Eff yield (inl (inl (inl (inl (inl (inl (inl (inl (inl (inl (inl a)))))))))))
+       (fun r' => option_branch (fun r => p) (Return inhabitant) (fromSetPSK r')))
+    (at level 100, right associativity).
+
+Notation "r <- 'yield' 'SessionResume' $ a ; p" :=
+  (Eff yield (inl (inl (inl (inl (inl (inl (inl (inl (inl (inl (inr a)))))))))))
+       (fun r' => option_branch (fun r => p) (Return inhabitant) (fromSessionResume r')))
+    (at level 100, right associativity).
+
+Notation "r <- 'yield' 'GetCurrentTime' $ a ; p" :=
+  (Eff yield (inl (inl (inl (inl (inl (inl (inl (inl (inl (inr a))))))))))
+       (fun r' => option_branch (fun r => p) (Return inhabitant) (fromGetCurrentTime r')))
+       (at level 100, right associativity).
+
+Notation "r <- 'yield' 'Close' $ a ; p" :=
+  (Eff yield (inl (inl (inl (inl (inl (inl (inl (inl (inr a)))))))))
+       (fun r => p))
+    (at level 100, right associativity).
+
+Notation "r <- 'yield' 'RecvClientHello' $ a ; p" :=
+  (Eff yield (inr (inr a))
+       (fun r' => option_branch
+                    (fun r => p)
+                    (option_branch (fun al => Eff yield (inl (inr (PAlert [al])))
+                                                  (fun _ => Return inhabitant))
+                                   (Return inhabitant) (retAlert r'))
+                    (fromRecvClientHello r')))
+       (at level 100, right associativity).
+
+Notation "r <- 'yield' 'RecvData' $ a ; p" :=
+  (Eff yield (inl (inl (inl (inl (inl (inr a))))))
+       (fun r' => option_branch
+                    (fun r => p)
+                    (option_branch (fun al => Eff yield (inl (inr (PAlert [al])))
+                                                  (fun _ => Return inhabitant))
+                                   (Return inhabitant) (retAlert r'))
+                    (fromRecvData r')))
+    (at level 100, right associativity).
+
+Notation "r <- 'yield' 'RecvFinished' $ a ; p" :=
+  (Eff yield (inr (inl (inl (inr a))))
+       (fun r' => option_branch
+                    (fun r => p)
+                    (option_branch (fun al => Eff yield (inl (inr (PAlert [al])))
+                                                  (fun _ => Return inhabitant))
+                                   (Return inhabitant) (retAlert r'))
+                    (fromRecvData r')))
+    (at level 100, right associativity).
+
+Notation "r <- 'yield' 'RecvCCS' $ a ; p" :=
+  (Eff yield (inr (inl (inr a)))
+       (fun r' => option_branch
+                    (fun r => p)
+                    (option_branch (fun al => Eff yield (inl (inr (PAlert [al])))
+                                                  (fun _ => Return inhabitant))
+                                   (Return inhabitant) (retAlert r'))
+                    (fromRecvCCS r')))
+    (at level 100, right associativity).
+
+Notation "r <- 'yield' 'RecvAppData' $ a ; p" :=
+  (Eff yield (inr (inl (inl (inl a))))
+       (fun r' => option_branch
+                    (fun r => p)
+                    (option_branch (fun al => Eff yield (inl (inr (PAlert [al])))
+                                                  (fun _ => Return inhabitant))
+                                   (Return inhabitant) (retAlert r'))
+                    (fromRecvAppData r')))
+    (at level 100, right associativity).
+
+Notation "r <- 'yield' 'GetRandomBytes' $ a ; p" :=
+  (Eff yield (inl (inl (inl (inl (inl (inl (inr a)))))))
+       (fun r' => option_branch (fun r => p) (Return inhabitant) (fromGetRandomBytes r')))
+    (at level 100, right associativity).
+
+Notation "r <- 'yield' 'SendPacket' $ a ; p" :=
+  (Eff yield (inl (inr a))
+       (fun r' => option_branch (fun r => p) (Return inhabitant) (fromSendPacket r')))
+    (at level 100, right associativity).
+
+Notation "r <- 'yield' 'GroupGetPubShared' $ a ; p" :=
+  (Eff yield (inl (inl (inl (inl (inr a)))))
+       (fun r' => option_branch (fun r => p) (Return inhabitant) (fromGroupGetPubShared r')))
+    (at level 100, right associativity).
+
+Notation "r <- 'yield' 'MakeCertVerify' $ a ; p" :=
   (Eff yield (inl (inl (inl (inr a))))
-       (fun r' => ((fun _ => Return tt) ||| (fun r => p) ||| (fun _ => Return tt) ||| (fun _ => Return tt) ||| (fun _ => Return tt) ||| (fun _ => Return tt)) r'))
+       (fun r' => option_branch (fun r => p) (Return inhabitant) (fromMakeCertVerify r')))
     (at level 100, right associativity).
 
-Notation "r <- 'yield' 'MakeCertVerify' $ a & o ; p" :=
+Notation "r <- 'yield' 'SetSecret' $ a ; p" :=
   (Eff yield (inl (inl (inr a)))
-       (fun r':rets_tls' => ((fun _ => Return o) ||| (fun r => p) ||| (fun _ => Return o) ||| (fun _ => Return o) ||| (fun _ => Return o)) r'))
+       (fun r' => option_branch (fun r => p) (Return inhabitant) (fromSetSecret r')))
     (at level 100, right associativity).
+*)
 
-Instance sigT_rets_inhabit : Inhabit rets_tls' :=
-  { inhabitant := inl (inr tt) }.
+Instance sigT_rets_inhabit : Inhabit rets_tls :=
+  { inhabitant := FromSetPSK }.
 
-Instance sigT_argss_inhabit : Inhabit args_tls' :=
-  { inhabitant := (inl (inl (inl (inl (inr tt))))) }.
+Instance sigT_args_inhabit : Inhabit args_tls :=
+  { inhabitant := close tt }.
 
 Parameter ProtocolType : Set.
 Inductive Header := header : ProtocolType -> Version -> nat -> Header.
@@ -378,11 +734,11 @@ Definition hdReadLen hd :=
   | header _ _ n => n
   end.
 
-Parameter decodeHeader : ByteString -> Header.
-Parameter decodeRecord : Header -> option (Hash * Cipher * ByteString * nat) -> ByteString -> option CPacket.
+Parameter decodeHeader : ByteString -> option Header.
+Parameter decodeRecord : Header -> option (Hash * Cipher * ByteString * nat) -> ByteString -> AlertLevel * AlertDescription + CPacket.
 Parameter Bsplit :  nat -> ByteString -> ByteString * ByteString.
 
-Notation "x <~ 'ifSome' o 'else' q ; p" :=
+Notation "x <~ 'ifSome' o {{ q }} p" :=
   (option_branch (fun x => p) q o)
     (at level 100, right associativity).
 
@@ -401,7 +757,7 @@ Fixpoint find {A:Set} (f : A -> bool) (l : list A) :=
   | a::l' => if f a then Some a else find f l'
   end.
 
-Definition checkSessionEquality usedCipher ciphers (*alpn*) sdata :=
+Definition checkSessionEquality usedCipher ciphers malpn sdata :=
   let isSameCipher := CipherID_beq (sessionCipher sdata) (cipherID usedCipher) in
   let isSameKDF :=
       match find (fun c => CipherID_beq (cipherID c) (sessionCipher sdata)) ciphers with
@@ -409,8 +765,8 @@ Definition checkSessionEquality usedCipher ciphers (*alpn*) sdata :=
       | Some c => Hash_beq (cipherHash c) (cipherHash usedCipher)
       end
   in
-(*  let isSameALPN := option_beq ByteString_beq (sessionALPN sdata) alpn in*)
-  (isSameKDF, isSameCipher(* && isSameALPN*)).
+  let isSameALPN := option_beq ByteString_beq (sessionALPN sdata) malpn in
+  (isSameKDF, isSameCipher && isSameALPN).
 
 Inductive PskIdentity := Build_PskIdentity : ByteString -> Word32 -> PskIdentity.
 
@@ -419,6 +775,7 @@ Inductive PreSharedKey :=
 | PreSharedKeyServerHello : nat -> PreSharedKey.
 
 Parameter extension_PreSharedKey : list ExtensionRaw -> option PreSharedKey.
+Parameter extension_ALPN : list ExtensionRaw -> option ByteString.
 
 Definition extension_PreSharedKeyCH exts :=
   match extension_PreSharedKey exts with
@@ -430,25 +787,55 @@ Definition extension_PreSharedKeyCH exts :=
 Definition sumnat l :=
   fold_left Nat.add l 0.
 Parameter b2s : ByteString -> String.string.
+Parameter Word32minus : Word32 -> Word32 -> Word32.
+Parameter Word64plus Word64minus Word64max : Word64 -> Word64 -> Word64.
+Parameter Word64gt : Word64 -> Word64 -> bool.
+Parameter Word32le : Word32 -> Word32 -> bool.
+Parameter w64_2000 : Word64.
+Parameter w32to64 : Word32 -> Word64.
 
-Definition choosePSK exts dhModes usedCipher ciphers (*alpn*) zero : t (const_yield args_tls') (const_yield rets_tls') (option (ByteString * option _ * bool)) :=
+Instance bool_inhabitant : Inhabit bool :=
+  { inhabitant := true }.
+
+Definition checkFreshness tinfo obfAge serverReceiveTime :=
+  match estimatedRTT tinfo with
+  | None => false
+  | Some rtt =>
+    let age := Word32minus obfAge (ageAdd tinfo) in
+    let expectedArrivalTime := Word64plus (txrxTime tinfo) (Word64plus rtt (w32to64 age)) in
+    let freshness := if Word64gt expectedArrivalTime serverReceiveTime then
+                       Word64minus expectedArrivalTime serverReceiveTime
+                     else Word64minus serverReceiveTime expectedArrivalTime
+    in
+    Word32le age (lifetime tinfo) && Word64gt (Word64max rtt w64_2000) freshness
+  end.
+
+Instance ByteString_inhabitant : Inhabit ByteString :=
+  { inhabitant := empty }.
+
+
+Definition choosePSK exts dhModes usedCipher ciphers zero
+  : t (const_yield args_tls) (const_yield rets_tls) (ByteString * option (_ * nat * nat) * bool) :=
   match extension_PreSharedKeyCH exts with
+  | None =>
+    Return (zero, None, false)
   | Some (sessionID, obfAge, bnds) =>
-    bnd <~ ifSome hd_error bnds else Return None;
+    bnd <~ ifSome hd_error bnds {{ Return (zero, None, false) }}
     if inb PskKexMode_beq PSK_DHE_KE dhModes then
       let len := (sumnat (map (fun x => Blength x + 1) bnds) + 2)%nat in
-      osdata <- yield SessionResume $ (b2s sessionID) & None;
-      sdata <~ ifSome osdata else Return (Some (zero, None, false));
-      tinfo <~ ifSome sessionTicketInfo sdata else Return (Some (zero, None, false));
+      osdata <- yield SessionResume $ (b2s sessionID);
+      sdata <~ ifSome osdata {{ Return (zero, None, false) }}
+      tinfo <~ ifSome sessionTicketInfo sdata {{ Return (zero, None, false) }}
       let psk := sessionSecret sdata in
-(*      isFresh <<- checkFreshness tinfo obfAge;*)
-      let (isPSKValid, is0RTTValid) := checkSessionEquality usedCipher ciphers (*alpn*) sdata in
-      if isPSKValid (* && isFresh *) then
-        Return (Some (psk, Some (bnd, 0, len), is0RTTValid))
-      else Return (Some (zero, None, false))
-    else Return (Some (zero, None, false))
-  | _ => Return (Some (zero, None, false))
-end.
+      serverReceiveTime <- yield GetCurrentTime $ tt;
+      let isFresh := checkFreshness tinfo obfAge serverReceiveTime in
+      let malpn := extension_ALPN exts in
+      let (isPSKValid, is0RTTValid) := checkSessionEquality usedCipher ciphers malpn sdata in
+      if isPSKValid && isFresh then
+        Return (psk, Some (bnd, 0, len), is0RTTValid)
+      else Return (zero, None, false)
+    else Return (zero, None, false)
+  end.
 
 Parameter Btake : nat -> ByteString -> ByteString.
 
@@ -464,78 +851,182 @@ Parameter ExtensionRaw_PreSharedKey : ByteString -> ExtensionRaw.
 
 Definition checkBinder chEncoded usedHash earlySecret binderInfo hsize :=
   match binderInfo with
-  | None => []
+  | None => Some []
   | Some (binder, n, tlen) =>
     let binder' := makePSKBinder chEncoded earlySecret usedHash tlen hsize in
     if ByteString_beq binder' binder then
       let selectedIdentity := extensionEncode_PreSharedKey (PreSharedKeyServerHello n) in
-      [ExtensionRaw_PreSharedKey selectedIdentity]
-    else []
+      Some [ExtensionRaw_PreSharedKey selectedIdentity]
+    else None
   end.
  
-Fixpoint chooseServerName ns :=
+Fixpoint chooseServerName' ns :=
   match ns with
   | [] => None
   | name::rest =>
     match name with
     | ServerNameHostName hostName => Some hostName
-    | _ => chooseServerName rest
+    | _ => chooseServerName' rest
     end
+  end.
+
+Parameter extension_ServerName : list ExtensionRaw -> option ServerName.
+
+Definition chooseServerName exts :=
+  match extension_ServerName exts with
+  | None => None
+  | Some (Build_ServerName ns) => chooseServerName' ns
   end.
 
 Parameter encodeHandshake13 : CHandshake -> ByteString.
 Parameter extension_PskKeyModes : list ExtensionRaw -> option (list PskKexMode).
 Parameter nat2Word32 : nat -> Word32.
-Parameter lifetime addAge : Word32.
+Parameter messageHash00 : ByteString.
+Parameter natToBytes : nat -> ByteString.
+Parameter hrrRandom : CServerRandom.
 
+Definition isSome {A:Set} (o : option A) :=
+  match o with
+  | Some _ => true
+  | None => false
+  end.
 
-Parameter packet2tinfo : CPacket -> option TicketInfo.
+Parameter extensionEncode_KeyShareHRR : Group -> ByteString.
+Parameter extensionEncode_SupportedVersionsServerHello : Version -> ByteString.
 
-Definition doHandshake (fuel:nat) (cch: CertificateChain)(pr: PrivateKey)(_: rets_tls')
-  : t (const_yield args_tls') (const_yield rets_tls') unit := Eval unfold option_branch in
+Definition doHelloRetryRequest chEncoded' ch hash cipher
+  : t (const_yield args_tls) (const_yield rets_tls) (option (list ByteString * ClientHelloMsg * KeyShare)) :=
+  Def (fun al => (_ <- yield SendPacket $ PAlert [(Alert_Fatal, al)];
+                 _ <- yield Close $ tt;
+                 Return None) : t (const_yield args_tls) (const_yield rets_tls) (option (list ByteString * ClientHelloMsg * KeyShare))) (fun alert =>
+  let chHashed := hashWith hash [chEncoded'] in
+
+  let clientGroups :=
+      match extension_NegotiatedGroups ch.(chExt) with
+      | Some gs => gs
+      | None => []
+      end
+  in
+  let possibleGroups := intersect serverGroups clientGroups in
+  match hd_error possibleGroups with
+  | None => _ <- yield SendPacket $ (PAlert [(Alert_Fatal, HandshakeFailure)]);
+            _ <- yield Close $ tt; Return None
+  | Some g =>
+    let serverKeyShare := extensionEncode_KeyShareHRR g in
+    let selectedVersion := extensionEncode_SupportedVersionsServerHello TLS13 in
+    let extensions := [extensionRaw_KeyShare serverKeyShare;
+                         extensionRaw_SupportedVersions selectedVersion]
+    in
+    let hrr := HServerHello hrrRandom ch.(chSess) (cipherID cipher) extensions in
+    _ <- yield SendPacket $ PHandshake [hrr];
+    _ <- yield SendPacket $ PChangeCipherSpec;
+    d <- yield RecvClientHello $ tt;
+    let (chEncoded, chnew) := (d : ByteString * ClientHelloMsg) in
+    let transcript := [messageHash00; natToBytes (Blength chHashed); chHashed; chEncoded] in
+    keyShares <~ ifSome extension_KeyShare chnew.(chExt)
+      {{ _ <- yield SendPacket $ (PAlert [(Alert_Fatal, IllegalParameter)]);
+         _ <- yield Close $ tt;
+         Return None
+      }}
+    match hd_error keyShares with
+    | None => _ <- yield SendPacket $ (PAlert [(Alert_Fatal, IllegalParameter)]);
+              _ <- yield Close $ tt;
+              Return None
+    | Some keyShare =>
+      if negb (Group_beq g keyShare.(ksGroup)) then
+        _ <- yield SendPacket $ (PAlert [(Alert_Fatal, IllegalParameter)]);
+        _ <- yield Close $ tt;
+        Return None
+      else
+        Return (Some (transcript, chnew, keyShare))
+    end
+  end).
+
+Parameter extension_SupportedVersionsCH : list ExtensionRaw -> option (list Version).
+Parameter bytes2w32 : ByteString -> Word32.
+Parameter life : Word32.
+
+Definition doHandshake (fuel:nat) (cch: CertificateChain)(pr: PrivateKey)(_: rets_tls)
+  : t (const_yield args_tls) (const_yield rets_tls) unit := Eval unfold option_branch in
+  Def (fun al => _ <- yield SendPacket $ PAlert [(Alert_Fatal, al)];
+                 _ <- yield Close $ tt;
+                 Return tt) (fun alert =>
   let certs := getCertificates cch in
-  d' <- yield RecvClientHello $ None;
+  d' <- yield RecvClientHello $ tt;
   let (chEncoded, se) := (d' : ByteString * ClientHelloMsg) in
   let sess := chSess se in
   let chExts := chExt se in
   let cipherIDs := chCipherIDs se in
-  cipher <~ ifSome chooseCipher cipherIDs serverCiphers else Return tt;
-  keyShares <~ ifSome extension_KeyShare chExts else Return tt;
-  keyShare <~ ifSome findKeyShare keyShares serverGroups else Return tt;
-  cpub <~ ifSome decodeGroupPublic (ksGroup keyShare) (ksData keyShare) else Return tt;
+  let oVer :=
+      match extension_SupportedVersionsCH chExts with
+      | None => None
+      | Some vers =>
+        if inb Version_beq TLS13 vers then
+          Some TLS13
+        else None
+      end
+  in
+  chosenVer <~ ifSome oVer
+    {{ alert ProtocolVersion }}
+  cipher <~ ifSome chooseCipher cipherIDs serverCiphers
+    {{ alert HandshakeFailure }}
+  let usedHash := cipherHash cipher in
+  let keyShares :=
+      match extension_KeyShare chExts with
+      | None => []
+      | Some kss => kss
+      end
+  in
+  o <<- match findKeyShare keyShares serverGroups with
+        | None => Return None (* doHelloRetryRequest chEncoded se usedHash cipher*)
+        | Some keyShare =>
+          Return (Some ([chEncoded], se, keyShare))
+        end;
+  d <~ ifSome o
+    {{ alert IllegalParameter }}
+  let (tch, keyShare) := (d : list ByteString * ClientHelloMsg * KeyShare) in
+  let (transcript', ch) := (tch : list ByteString * ClientHelloMsg) in
+  let chExts := chExt ch in
+  cpub <~ ifSome decodeGroupPublic (ksGroup keyShare) (ksData keyShare)
+    {{ alert IllegalParameter }}
   mecdhePair <- yield GroupGetPubShared $ cpub;
-  ecdhePair <~ ifSome mecdhePair else Return tt;
+  ecdhePair <~ ifSome mecdhePair
+    {{ alert IllegalParameter (*_ <- yield SendPacket $ (PAlert [(Alert_Fatal, IllegalParameter)]);
+(*       _ <- yield Close $ tt;*)
+       Return tt *) }}
   let wspub := encodeGroupPublic (fst ecdhePair) in
   let ecdhe := ba_convert (snd ecdhePair) in
   let serverKeyShare := {| ksGroup := ksGroup keyShare; ksData := wspub |} in
-(*  let serverName :=
-      match extension_ServerName chExts with
-      | Some (Build_ServerName ns) => chooseServerName ns
-      | None => None
-      end
+  let osni := chooseServerName chExts in
+  let eExts := match osni with
+               | None => []
+               | Some _ => [sniExt]
+               end
   in
-  protos <~ ifSome extension_ApplicationLayerProtocolNegotiation chExts else Return tt;
-*)
   
   (* sendServerHello *)
   let ks := extensionEncode_KeyShare serverKeyShare in
   let selectedVersion := extensionEncode_SupportedVersions TLS13 in
-  let usedHash := cipherHash cipher in
+
   let hsize := hashDigestSize usedHash in
   let zero := b_replicate hsize w0 in
-  dhModes <~ ifSome extension_PskKeyModes chExts else Return tt;
-  p' <<- choosePSK chExts dhModes cipher serverCiphers (*alpn*) zero;
-  p <~ ifSome p' else Return tt;
+  let dhModes := match extension_PskKeyModes chExts with
+                 | Some ms => ms
+                 | None => []
+                 end
+  in
+  p <<- choosePSK chExts dhModes cipher serverCiphers zero;
   let (pb, is0RTTValid) := p : ByteString * option (ByteString * nat * nat) * bool in
   let (psk, binderInfo) := pb in
   let earlySecret := hkdfExtract usedHash zero psk in
-  let extensions := checkBinder chEncoded usedHash earlySecret binderInfo hsize in
+  extensions <~ ifSome checkBinder chEncoded usedHash earlySecret binderInfo hsize
+    {{ alert DecryptError }}
   let extensions' :=
       extensionRaw_KeyShare ks :: extensionRaw_SupportedVersions selectedVersion  :: extensions
   in
   srand <- yield GetRandomBytes $ 32;
   shEncoded <- yield SendPacket $
-            (PHandshake [HServerHello (SR srand) sess (cipherID cipher) extensions'], None) & tt;
+            (PHandshake [HServerHello (SR srand) sess (cipherID cipher) extensions']);
 
   (* calculate handshake secrets *)
   let hCh := hashWith usedHash [chEncoded; shEncoded] in
@@ -545,60 +1036,79 @@ Definition doHandshake (fuel:nat) (cch: CertificateChain)(pr: PrivateKey)(_: ret
   let clientHandshakeSecret := hkdfExpandLabel usedHash handshakeSecret (s2b "c hs traffic") hCh hsize in
   let serverHandshakeSecret := hkdfExpandLabel usedHash handshakeSecret (s2b "s hs traffic") hCh hsize in
 
-  ccsEncoded <- yield SendPacket $ (PChangeCipherSpec, None) & tt;
+  ccsEncoded <- yield SendPacket $ PChangeCipherSpec;
+  _ <- yield SetSecret $ (usedHash, cipher, serverHandshakeSecret, false);
   extEncoded <- yield SendPacket $
-             (PHandshake [HEncryptedExtensions []], Some (usedHash, cipher, serverHandshakeSecret)) & tt;
+             (PHandshake [HEncryptedExtensions eExts]);
   let sendCertAndVerify :=
-      let transcript := [chEncoded; shEncoded; extEncoded] in
+      let transcript := (transcript' ++ [shEncoded; extEncoded])%list in
       match binderInfo with
       | Some _ => Return (Some transcript)
       | None =>
-        let hashSigs := extension_SignatureAlgorithms chExts in
-        pubhs <~ ifSome decideCredInfo pr certs hashSigs else Return None;
+        hashSigs <~ ifSome extension_SignatureAlgorithms chExts
+          {{ _ <- yield SendPacket $ PAlert [(Alert_Fatal, MissingExtension)];
+             _ <- yield Close $ tt;
+             Return None }}
+        pubhs <~ ifSome decideCredInfo pr certs hashSigs
+          {{ _ <- yield SendPacket $ (PAlert [(Alert_Fatal,HandshakeFailure)]);
+             _ <- yield Close $ tt;
+             Return None }}
         let (pub,hashSig) := pubhs : PublicKey * HashAndSignatureAlgorithm in
         certEncoded <- yield SendPacket $
-                    (PHandshake [HCertificate empty cch [[]]], Some (usedHash, cipher, serverHandshakeSecret)) & None;
-        let hashed := hashWith (cipherHash cipher) ([chEncoded;shEncoded;extEncoded;certEncoded]) in
-        cv <- yield MakeCertVerify $ (pub,pr,hashSig,hashed) & None;
-        cvEncoded <- yield SendPacket $
-                  (PHandshake [cv], Some (usedHash, cipher, serverHandshakeSecret)) & None;
+                    (PHandshake [HCertificate empty cch [[]]]);
+        let hashed := hashWith (cipherHash cipher) (transcript ++ [certEncoded]) in
+        cv <- yield MakeCertVerify $ (pub,pr,hashSig,hashed);
+        cvEncoded <- yield SendPacket $ (PHandshake [cv]);
         Return (Some (transcript ++ [certEncoded; cvEncoded])%list)
       end
   in
   otranscript <<- sendCertAndVerify;
-  transcript <~ ifSome otranscript else Return tt;
+  transcript <~ ifSome otranscript {{ Return tt }}
   
   let hashed' := hashWith (cipherHash cipher) transcript in
   finEncoded <- yield SendPacket $
-             (PHandshake [HFinished (makeVerifyData usedHash serverHandshakeSecret hashed')],
-              Some (usedHash, cipher, serverHandshakeSecret)) & tt;
+             (PHandshake [HFinished (makeVerifyData usedHash serverHandshakeSecret hashed')]);
+  sfSentTime <- yield GetCurrentTime $ tt;
   let hashed'' := hashWith (cipherHash cipher) (transcript ++ [finEncoded]) in
   let applicationSecret := hkdfExtract usedHash (hkdfExpandLabel usedHash handshakeSecret (s2b "derived") (hashWith usedHash [s2b ""]) hsize) zero in
   let clientApplicationSecret := hkdfExpandLabel usedHash applicationSecret (s2b "c ap traffic") hashed'' hsize in
   let serverApplicationSecret := hkdfExpandLabel usedHash applicationSecret (s2b "s ap traffic") hashed'' hsize in
 
-  _ <- yield RecvCCS $ None;
-  fin <- yield RecvFinished $ (Some (usedHash, cipher, clientHandshakeSecret));
+  _ <- yield RecvCCS $ tt;
+  _ <- yield SetSecret $ (usedHash, cipher, clientHandshakeSecret, true);
+  fin <- yield RecvFinished $ tt;
+  cfRecvTime <- yield GetCurrentTime $ tt;
 
   (* calculate application secrets *)
   let hashed''' := hashWith (cipherHash cipher) (transcript ++ [finEncoded; encodeHandshake13 (HFinished fin)]) in
   let resumptionMasterSecret := hkdfExpandLabel usedHash applicationSecret (s2b "res master") hashed''' hsize in
   if ByteString_beq fin (makeVerifyData usedHash clientHandshakeSecret hashed'') then
-    let pac := PHandshake [HNewSessionTicket lifetime addAge (s2b "0") (s2b "TestSession") []] in
+    nonce <- yield GetRandomBytes $ 32;
+    bAgeAdd <- yield GetRandomBytes $ 4;
+    let bAdd := bytes2w32 bAgeAdd in
+    let tinfo := {| lifetime := life;
+                    ageAdd := bAdd;
+                    txrxTime := cfRecvTime;
+                    estimatedRTT := Some (Word64minus cfRecvTime sfSentTime) |}
+    in
+    let pac := PHandshake [HNewSessionTicket life (bytes2w32 bAgeAdd) nonce (s2b "TestSession") []] in
     _ <- yield SetPSK $ ("TestSession",
                          {| sessionVersion := TLS13;
                             sessionCipher := cipherID cipher;
                             sessionGroup := None;
-                            sessionTicketInfo := packet2tinfo pac;
+                            sessionTicketInfo := Some tinfo;
                             sessionCompression := dummyCompressionID;
-                            sessionClientSNI := None;
+                            sessionClientSNI := osni;
                             sessionSecret := hkdfExpandLabel usedHash resumptionMasterSecret (s2b "resumption") (s2b "0") hsize;
                             sessionALPN := None;
                             sessionMaxEarlyDataSize := 5;
                             sessionFlags := []
-                        |});
-    _ <- yield SendPacket $ (pac, Some (usedHash, cipher, serverApplicationSecret)) & tt;
-      Return tt
+                         |});
+    _ <- yield SetSecret $ (usedHash, cipher, serverApplicationSecret, false);
+    _ <- yield SetSecret $ (usedHash, cipher, clientApplicationSecret, true);
+    _ <- yield SendPacket $ pac;
+    _ <- yield Close $ tt;
+    Return tt
     (*
     nat_rect_nondep
       (fun _ => Return tt)
@@ -608,7 +1118,10 @@ Definition doHandshake (fuel:nat) (cch: CertificateChain)(pr: PrivateKey)(_: ret
          rec tt)
       fuel tt
 *)
-  else Return tt
+  else
+    _ <- yield SendPacket $ (PAlert [(Alert_Fatal, DecryptError)]);
+    _ <- yield Close $ tt; 
+    Return tt)
 .
 
 Opaque replicate.
@@ -616,12 +1129,13 @@ Opaque replicate.
 Definition doHandshake_derive :
   { state & { step &
               forall fuel certs priv,
-                { init | @equiv_coro _ _ _ _ _ state step init (doHandshake fuel certs priv) }}}.
+                { init | @equiv_coro _ _ _ _ _ state step init (doHandshake fuel certs priv) } } }.
 Proof.
   do 3 eexists.
   unfold doHandshake.
-  unfold choosePSK, option_branch.
+  Set Ltac Profiling.
   derive_coro (tt,fuel,certs,priv).
+  Show Ltac Profile.
   Grab Existential Variables.
   all: exact inhabitant.
 Time Defined.
@@ -635,43 +1149,57 @@ Definition doHandshake_equiv fuel certs keys :
 Hint Resolve doHandshake_equiv : equivc.
 
 Notation "r <- 'yield' 'SendData' $ a ; p" :=
-  (Eff yield (inl (inl (inl (inl (inl (inl (inr a)))))))
+  (Eff yield (sendData a)
        (fun r => p))
     (at level 100, right associativity).
+(*
+Notation "r <- 'yield' 'SendData' $ a ; p" :=
+  (Eff yield (inl (inl (inl (inl (inl (inl (inl (inr a))))))))
+       (fun r => p))
+    (at level 100, right associativity).
+ *)
 
-Definition parse header bs (s:unit+unit+unit+unit) o : t (const_yield args_tls') (const_yield rets_tls') (option (String.string + rets_tls')) :=
+Definition decode header bs (s:unit+unit+unit+unit) o : t (const_yield args_tls) (const_yield rets_tls) rets_tls :=
   match decodeRecord header o bs with
-  | None => Return (Some (inl "decode failed"))
-  | Some r => 
+  | inl al => Return (RetAlert al)
+  | inr r => 
     match s with
     | inr _ =>
       match clientHello r with
-      | None => Return (Some (inl "cliehthello not match"))
-      | Some c => Return (Some (inr (inr (bs,c))))
+      | None => Return (RetAlert (Alert_Fatal, UnexpectedMessage))
+      | Some c => Return (FromRecvClientHello (bs,c))
       end
     | inl (inr _) =>
       match changeCipherSpec r with
-      | None => Return (Some (inl "changecipherspec not match"))
-      | Some _ => Return (Some (inr (inl (inr tt))))
+      | None => Return (RetAlert (Alert_Fatal, UnexpectedMessage))
+      | Some _ => Return FromRecvCCS
       end
     | inl (inl (inr _)) =>
       match handshake r with
-      | None => Return (Some (inl "handshake not match"))
+      | None => Return (RetAlert (Alert_Fatal, UnexpectedMessage))
       | Some h =>
         match finished h with
-        | None => Return (Some (inl "finished not match"))
-        | Some f => Return (Some (inr (inl (inl (inr f)))))
+        | None => Return (RetAlert (Alert_Fatal, UnexpectedMessage))
+        | Some f => Return (FromRecvFinished f)
         end
       end
     | inl (inl (inl _)) =>
       match appData r with
-      | None => Return (Some (inl "appdata not match"))
-      | Some a => Return (Some (inr (inl (inl (inr a)))))
+      | None => Return (RetAlert (Alert_Fatal, UnexpectedMessage))
+      | Some a => Return (FromRecvAppData a)
       end
     end
   end.
 
-Definition seqNum (tbl : list (ByteString * nat))(key : ByteString) :=
+(*
+Definition seqNum (current : ByteString * nat)(key : ByteString) :=
+  let (k,n) := current in
+  if ByteString_beq key k key then
+    (k, S n, n)
+  else
+    (key, 1, 0).
+*)
+(*
   (fix aux pre tbl :=
      match tbl with
      | [] => ((key,1)::pre, 0)
@@ -680,71 +1208,103 @@ Definition seqNum (tbl : list (ByteString * nat))(key : ByteString) :=
          ((k,S n)::pre ++ tbl, n)%list
        else aux ((k,n)::pre) rest
      end) [] tbl.
-
-(*
-Parameter encodePacket : CPacket -> option (Hash * Cipher * ByteString * nat) -> ByteString.
 *)
 
-Definition readWrite fuel certs keys(_: rets_tls') : t (const_yield _) (const_yield rets_tls') (option String.string) := Eval unfold parse in
+Parameter maxCiphertextSize : nat.
+
+(*
+Notation "r <- 'yield' 'RecvData_' $ a ; p" :=
+  (Eff yield (inl (inl (inl (inl (inl (inr a))))))
+       (fun r' => option_branch
+                    (fun r => p)
+                    (option_branch (fun al => Eff yield (inl (inr (PAlert [al])))
+                                                  (fun _ => Return inhabitant))
+                                   (Return inhabitant) (retAlert r'))
+                    (fromRecvData r')))
+    (at level 100, right associativity).
+*)
+
+Definition isRecvPacket p :=
+  match p with
+  | recvPacket a => Some a
+  | _ => None
+  end.
+
+Definition isSendPacket p :=
+  match p with
+  | sendPacket a => Some a
+  | _ => None
+  end.
+
+Definition isSetSecret p :=
+  match p with
+  | setSecret a => Some a
+  | _ => None
+  end.
+
+Definition readWrite fuel certs keys(_: rets_tls) : t (const_yield _) (const_yield rets_tls) (option String.string) :=
   pipe (doHandshake fuel certs keys) (fun coro : coro_type doHandshake_step =>
   nat_rect_nondep
     (fun _ => Return None)
-    (fun _ rec (ctx: list (ByteString * nat) * option ((unit+unit+unit+unit)*option (Hash*Cipher*ByteString)) * ByteString * rets_tls' * coro_type doHandshake_step) =>
+    (fun _ rec (ctx: option (Hash * Cipher * ByteString * nat) * option (Hash * Cipher * ByteString * nat) * option (unit+unit+unit+unit) * ByteString * rets_tls * coro_type doHandshake_step) =>
+       _ <- yield (getRandomBytes 0); (* needed for compiler limitation *)
        match ctx with
-       | (tbl,s,bs,a,c) =>
-       match s with
+       | (recvinfo,sendinfo,omtype,bs,a,c) =>
+       match omtype with
        | None =>
          r <- resume c $ a;
-         match r with
-         | inr eo =>
-           _ <- yield (inl (inl (inl (inl (inl (inr 1))))));
-(*           _ <- yield GetRandomBytes $ 1; *) (* needed for compiler limitation *)
-             rec (tbl, Some eo, mconcat [bs], a, c)
-         | inl (inr (pkt,o)) =>
-           match o with
+         match isRecvPacket r with
+         | Some mtype =>
+           rec (recvinfo, sendinfo, Some mtype, bs, a, c)
+         | None =>
+           match isSendPacket r with
+           | Some pkt  =>
+             match sendinfo with
+             | None =>
+               a' <- yield SendData $ (pkt, None);
+               rec (recvinfo, None, None, bs, a', c)
+             | Some (q,num) =>
+               a' <- yield SendData $ (pkt, (Some (q, num)));
+               rec (recvinfo, Some (q, S num), None, bs, a', c)
+             end
            | None =>
-             a' <- yield SendData $ (pkt, None);
-               rec (tbl, None, bs, a', c)
-           | Some sec =>
-             let (tbl', num) := seqNum tbl (snd sec) in
-             a' <- yield SendData $ (pkt, (Some (sec, num)));
-               rec (tbl', None, bs, a', c)
+             match isSetSecret r with
+             | Some (q, true) =>
+               rec (Some (q,0), sendinfo, None, bs, FromSetSecret, c)
+             | Some (q, false) =>
+               rec (recvinfo, Some (q,0), None, bs, FromSetSecret, c)
+             | None =>
+               a' <- yield r;
+                 rec (recvinfo, sendinfo, None, bs, a', c)
+             end
            end
-         | _ =>
-           a' <- yield r;
-             rec (tbl, None, bs, a', c)
          end
-       | Some o =>
+       | Some mtype =>
          if Nat.ltb (Blength bs) 5 then
-           bs' <- yield RecvData $ tt & Some "fail";
-             rec (tbl, Some o, mconcat [bs; bs'], a, c)
+           bs' <- yield RecvData $ tt;
+           rec (recvinfo, sendinfo, Some mtype, mconcat [bs; bs'], a, c)
          else
-           let p := Bsplit 5 bs in
-           let header := decodeHeader (fst p) in
-           if Nat.ltb (Blength (snd p)) (hdReadLen header) then
-             bs' <- yield RecvData $ tt & Some "fail";
-             rec (tbl, Some o, mconcat [bs; bs'], a, c)
-           else
-             let p' := Bsplit (hdReadLen header) (snd p) in
-             let o' :=
-                 match snd o with
-                 | None => (tbl, None)
-                 | Some sec =>
-                   let p := seqNum tbl (snd sec) in
-                   (fst p, Some (sec, snd p))
-                 end
-             in
-             a' <<- parse header (fst p') (fst o) (snd o');
-               match a' with
-               | Some (inr a'') =>
-                 _ <- yield (inl (inl (inl (inl (inl (inr 1))))));
-                 rec (fst o', None, snd p', a'', c)
-               | Some (inl err) => Return (Some err)
-               | None => Return None
-                 end
-     end
+           let (hd,rest) := Bsplit 5 bs in
+           match decodeHeader hd with
+           | None => rec (recvinfo, sendinfo, None, rest, RetAlert (Alert_Fatal, DecodeError), c)
+           | Some hdr =>
+             if Nat.ltb maxCiphertextSize (hdReadLen hdr) then
+               rec (recvinfo, sendinfo, None, empty, RetAlert (Alert_Fatal, RecordOverflow), c)
+             else if Nat.ltb (Blength rest) (hdReadLen hdr) then
+               bs' <- yield RecvData $ tt;
+               rec (recvinfo, sendinfo, Some mtype, mconcat [bs; bs'], a, c)
+             else
+             let (msg,rest') := Bsplit (hdReadLen hdr) rest in
+             a' <<- decode hdr msg mtype recvinfo;
+             match recvinfo with
+             | Some (q, num) =>
+               rec (Some (q, S num), sendinfo, None, rest', a', c)
+             | None => rec (None, sendinfo, None, rest', a', c)
+             end
+           end
+       end
      end)
-    fuel ([], None,empty, inl (inr tt), coro)).
+    fuel (None, None, None, empty, inhabitant, coro)).
 
 Inductive GenForall2_prod_r (A A1 A2 : Set)(R : A1 -> A2 -> Prop) : A * A1 -> A * A2 -> Prop :=
   GenForall2_prod_r_rule : forall a x1 x2, R x1 x2 -> GenForall2_prod_r A A1 A2 R (a,x1) (a,x2).
@@ -755,8 +1315,7 @@ Program Instance prod_r_HasGenForall2 (A:Set) : HasGenForall2 (prod A) :=
 Program Instance id_HasGenForall2 : HasGenForall2 (fun A:Set => A) :=
   { GenForall2 := fun A1 A2 R => R }.
 
-Instance ByteString_inhabitant : Inhabit ByteString :=
-  { inhabitant := empty }.
+Opaque doHandshake_derive.
 
 Definition readWrite_derive :
   { state & { step &
@@ -764,8 +1323,10 @@ Definition readWrite_derive :
                 { init | @equiv_coro _ _ _ _ _ state step init (readWrite fuel certs priv) } } }.
 Proof.
   do 3 eexists.
-
+  unfold decode.
+  Set Ltac Profiling.
   unshelve derive (tt,fuel,certs,priv); exact inhabitant.
+  Show Ltac Profile.
 Time Defined.
 
 Inductive eff_conn := newAccept | perform | receive.
@@ -774,7 +1335,7 @@ Inductive eff_conn := newAccept | perform | receive.
 Definition args_conn (e : eff_conn) :=
   match e with
   | newAccept => unit
-  | perform => string * args_tls'
+  | perform => string * args_tls
   | receive => unit
   end.
 
@@ -782,7 +1343,7 @@ Definition rets_conn (e : eff_conn) :=
   match e with
   | newAccept => option string
   | perform => unit
-  | receive => option (string * rets_tls')
+  | receive => option (string * rets_tls)
   end.
 
 Notation "r <- ef a ; p" :=
@@ -798,15 +1359,15 @@ Definition readWrite_equiv fuel certs keys :
 
 Hint Resolve readWrite_equiv : equivc.
 
-Definition isSetPSK (x : args_tls') :=
+Definition isSetPSK (x : args_tls) :=
   match x with
-  | inl (inl (inl (inl (inl (inl (inl (inl x))))))) => Some x
+  | setPSK a => Some a
   | _ => None
   end.
 
-Definition isSessionResume (x : args_tls') :=
+Definition isSessionResume (x : args_tls) :=
   match x with
-  | inl (inl (inl (inl (inl (inl (inl (inr x))))))) => Some x
+  | sessionResume a => Some a
   | _ => None
   end.
 
@@ -839,11 +1400,12 @@ Fixpoint lookupAndDelete' {A : Set} key (m : Map A) (ctx : Map A -> Map A) :=
 Definition lookupAndDelete {A : Set} key (m : Map A) :=
   lookupAndDelete' key m (fun x => x).
 
-Definition main_loop fuel fuel' certs keys :=
+Definition main_loop fuel fuel' certs keys := Eval unfold option_branch in
   nat_rect_nondep
     (fun _ => Return (@None unit))
-    (fun _ rec maps =>
-       let (m,tr) := maps : _ * Map (coro_type readWrite_step) in
+    (fun _ rec ormaps =>
+       let (orm,coros) := ormaps : option (string * rets_tls) * Map SessionData * Map (coro_type readWrite_step) in
+       let (or,m) := orm : option (string * rets_tls) * Map SessionData in
        osa <- newAccept tt;
          match osa with
          | Some sa =>
@@ -851,46 +1413,43 @@ Definition main_loop fuel fuel' certs keys :=
                 (fun c =>
                    ef <- resume c $ inhabitant;
                      _ <- perform (sa, ef);
-                     let tr' := insert sa c tr in
-                     rec (m, tr'))
+                     let coros' := insert sa c coros in
+                     rec (or, m, coros'))
          | None =>
-           o <- receive tt;
-             match o with
-             | None => rec (m,tr)
-             | Some (sa,r) =>
-               let ocoro := bsearch sa tr in
-               match ocoro with
-               | Some coro =>
-                 ef <- resume coro $ r;
-                 match isSetPSK ef with
-                 | Some (sid,sess) =>
-(*                 | inl (inl (inl (inl (inl (inl (inl (inl (sid, sess)))))))) => *)
-                   let m' := insert sid sess m in
-                   ef <- resume coro $ (inl (inr tt));
-                   _ <- perform (sa, ef);
-                   let tr' := replace_map sa coro tr in
-                   rec (m', tr')
-                 | None =>
-                   match isSessionResume ef with
-                   | Some sid =>
-(*                 | inl (inl (inl (inl (inl (inl (inl (inr sid))))))) =>*)
-                     let (sess,m') := lookupAndDelete sid m in
-                     ef <- resume coro $ (inl (inl (inl (inl (inl sess)))));
-                     _ <- perform (sa, ef);
-                     let tr' := replace_map sa coro tr in
-                     rec (m', tr')
-                   | None =>
-(*                 | _ => *)
-                     _ <- perform (sa,ef);
-                     let tr' := replace_map sa coro tr in
-                     rec (m, tr')
-                   end
+           osar <<-
+               match or with
+               | Some p => Return (Some p)
+               | None =>
+                 o <- receive tt;
+                 match o with
+                 | None => Return None
+                 | Some p => Return (Some p)
                  end
-               | None => Return None
+               end;
+           match osar with
+           | None => rec (None, m, coros)
+           | Some (sa,r) =>
+             let ocoro := bsearch sa coros in
+             coro <~ ifSome ocoro {{ Return None }}
+             ef <- resume coro $ r;
+             let coros' := replace_map sa coro coros in
+             match isSetPSK ef with
+             | Some (sid,sess) =>
+               let m' := insert sid sess m in
+               rec (Some (sa, FromSetPSK), m', coros')
+             | None =>
+               match isSessionResume ef with
+               | Some sid =>
+                 let (sess,m') := lookupAndDelete sid m in
+                 rec (Some (sa, (FromSessionResume sess)), m', coros')
+               | None =>
+                 _ <- perform (sa,ef);
+                 rec (None, m, coros')
                end
              end
+           end
          end)
-    fuel (Leaf _, Leaf _).
+    fuel (None, Leaf _, Leaf _).
 
 Parameter certs_dummy : CertificateChain.
 Parameter privkey_dummy : PrivateKey.
@@ -1005,12 +1564,12 @@ Ltac to_dummy' i p :=
       constr:((@seq_abs A B eff args rets D state step z (coro_type step) c, f))
 *)
     end
-  | @bind ?T ?S ?eff ?args ?rets ?p ?f =>
+  | @bind ?T ?T' ?eff ?args ?rets ?p ?f =>
     let x :=  (eval cbv beta in (f (dummy _ _ i))) in
     let d := to_dummy' (S i) x in
     lazymatch (eval pattern (dummy _ T i) in d) with
     | ?g _ =>
-      constr:((@bind T S eff args rets p, g))
+      constr:((@bind T T' eff args rets p, g))
     end
   | (match ?o with inl _ => _ | inr _ => _ end) =>
     let fl := sum_match_fun_l p in
@@ -1127,12 +1686,12 @@ Ltac reconstruct' tree i :=
     | ?p'' _ _ =>
       constr:(@step_state A B _ _ eff args rets _ step st z p'')
     end
-  | (@bind ?T ?S ?eff ?args ?rets ?p, ?g) =>
+  | (@bind ?T ?T' ?eff ?args ?rets ?p, ?g) =>
     let x := (eval cbv beta in (g (dummy _ _ i))) in
     let q := reconstruct' x (S i) in
     lazymatch (eval pattern (dummy _ T i) in q) with
     | ?g' _ =>
-      constr:(@bind T S eff args rets p g')
+      constr:(@bind T T' eff args rets p g')
     end
   | (@sum_merge ?A ?B, ?fl, ?fr, ?o) =>
     let xl := (eval cbv beta in (fl (dummy _ _ i))) in
@@ -1203,12 +1762,35 @@ Ltac coro_to_state' p :=
     end
   end.
 
+Ltac mid_eq_core' :=
+  discriminate
+  || dest_match
+  || proc_step
+  || apply eq_refl
+  || (progress (repeat match goal with
+                       | H : _ |- _ => apply H
+                       end);
+      ((simpl in *; congruence) || solve [eauto with foldable equivc] || solve [simpl; eauto]))
+  || generalize_and_ind
+  || lazymatch goal with
+       |- Eff ?e ?a ?f = Eff _ _ ?f0 =>
+       apply (@f_equal _ _ (fun x => Eff e a x) f f0);
+       let H := fresh in
+       extensionality H
+     | |- (_ <<- _ ; _) = (_ <<- _ ; _ ) =>
+       f_equal;
+       let H := fresh in
+       extensionality H
+     end
+  || eauto with foldable equivc.
+
 Definition main_loop_derive  :
   { state & { step & forall fuel fuel' certs keys,
-                { init | @equiv _ _ _ _ state step init (main_loop fuel fuel' certs keys) }}}.
+                { init | @equiv _ _ _ _ state step init (main_loop fuel fuel' certs keys) } } }.
 Proof.
   do 3 eexists.
-
+  Set Ltac Profiling.
+  
   lazymatch goal with
     |- equiv _ ?init ?x =>
     let u := open_constr:(inl (tt,fuel,fuel',certs,keys)) in
@@ -1216,13 +1798,10 @@ Proof.
     let H := fresh in
     assert (x = ltac:(let x' := eval red in x in
                           let x'' := coro_to_state' x' in exact x''))
-      as H by
-         (change x with ltac:(let x0 := eval red in x in exact x0);
-            unfold pipe, sum_merge;
-            repeat mid_eq_core)
   end.
-  
-    rewrite H;
+  unfold main_loop,pipe,sum_merge.
+  repeat mid_eq_core'.
+  rewrite H;
     clear H;
     unfold step_state.
     repeat eexists;
@@ -1274,7 +1853,7 @@ Extract Inductive option => "GHC.Base.Maybe" ["GHC.Base.Just" "GHC.Base.Nothing"
 Extract Inductive Group => "T.Group" ["T.P256" "T.P384" "T.P521" "T.X25519"].
 Extract Inductive KeyShare => "I.KeyShareEntry" ["I.KeyShareEntry"].
 Extract Inductive CHandshake => "I.Handshake13" ["I.ClientHello13" "I.ServerHello13" "I.NewSessionTicket13" "I.EndOfEarlyData13" "I.EncryptedExtensions13" "I.CertRequest13" "I.Certificate13" "I.CertVerify13" "I.Finished13" "I.KeyUpdate13"].
-Extract Inductive CPacket => "I.Packet13" ["I.Handshake13" "I.ChangeCipherSpec13" "I.AppData13"].
+Extract Inductive CPacket => "I.Packet13" ["I.Handshake13" "I.Alert13" "I.ChangeCipherSpec13" "I.AppData13"].
 Extract Inductive Header => "I.Header" ["I.Header"].
 Extract Inductive CServerRandom => "I.ServerRandom" ["I.ServerRandom"].
 Extract Inductive CClientRandom => "I.ClientRandom" ["I.ClientRandom"].
@@ -1283,13 +1862,51 @@ Extract Inductive SessionFlag =>"I.SessionFlag" ["I.SessionEMS"].
 Extract Inductive PskIdentity => "I.PskIdentity" ["I.PskIdentity"].
 Extract Inductive PreSharedKey => "I.PreSharedKey" ["I.PreSharedKeyClientHello" "I.PreSharedKeyServerHello"].
 Extract Inductive PskKexMode => "I.PskKexMode" ["I.PSK_KE" "I.PSK_DHE_KE"].
+Extract Inductive HashAlgorithm => "I.HashAlgorithm" ["I.HashNone" "I.HashMD5" "I.HashSHA1" "I.HashSHA224" "I.HashSHA256" "I.HashSHA384" "I.HashSHA512" "I.HashIntrinsic" "I.HashOther"].
+Extract Inductive SignatureAlgorithm => "I.SignatureAlgorithm" ["I.SignatureAnonymous" "I.SignatureRSA" "I.SignatureDSS" "I.SignatureECDSA" "I.SignatureRSApssRSAeSHA256" "I.SignatureRSApssRSAeSHA384" "I.SignatureRSApssRSAeSHA512" "I.SignatureEd25519" "I.SignatureEd448" "I.SignatureRSApsspssSHA256" "I.SignatureRSApsspssSHA384" "I.SignatureRSApsspss512" "I.SignatureOther"].
+Extract Inductive ServerNameType => "I.ServerNameType" ["I.ServerNameHostName" "I.ServerNameOther"].
+Extract Inductive ServerName => "I.ServerName" ["I.ServerName"].
+Extract Inductive AlertLevel => "I.AlertLevel" ["I.AlertLevel_Warning" "I.AlertLevel_Fatal"].
+Extract Inductive AlertDescription => "I.AlertDescription"
+[ "I.CloseNotify"
+  "I.UnexpectedMessage"
+  "I.BadRecordMac"
+  "I.DecryptionFailed"
+  "I.RecordOverflow"
+  "I.DecompressionFailure"
+  "I.HandshakeFailure"
+  "I.BadCertificate"
+  "I.UnsupportedCertificate"
+  "I.CertificateRevoked"
+  "I.CertificateExpired"
+  "I.CertificateUnknown"
+  "I.IllegalParameter"
+  "I.UnknownCa"
+  "I.AccessDenied"
+  "I.DecodeError"
+  "I.DecryptError"
+  "I.ExportRestriction"
+  "I.ProtocolVersion"
+  "I.InsufficientSecurity"
+  "I.InternalError"
+  "I.InappropriateFallback"
+  "I.UserCanceled"
+  "I.NoRenegotiation"
+  "I.MissingExtension"
+  "I.UnsupportedExtension"
+  "I.CertificateUnobtainable"
+  "I.UnrecognizedName"
+  "I.BadCertificateStatusResponse"
+  "I.BadCertificateHashValue"
+  "I.UnknownPskIdentity"
+  "I.CertificateRequired"
+  "I.NoApplicationProtocol"].
 Extract Constant ProtocolType => "I.ProtocolType".
 Extract Constant decodeRecord => "Helper.decodeRecord".
-Extract Constant decodeHeader => "\bs -> case I.decodeHeader bs of { Prelude.Right x -> x }".
+Extract Constant decodeHeader => "\bs  -> case I.decodeHeader bs of Prelude.Right a -> GHC.Base.Just a ; _ -> GHC.Base.Nothing".
 Extract Constant Certificate => "X.Certificate".
 Extract Constant CertificateChain => "X.CertificateChain".
 Extract Constant getCertificates => "\cch -> case cch of { X.CertificateChain certs -> Prelude.map X.getCertificate certs }".
-Extract Constant HashAndSignatureAlgorithm => "I.HashAndSignatureAlgorithm".
 Extract Constant Group_eq_dec => "(GHC.Base.==)".
 Extract Constant Group_beq => "(GHC.Base.==)".
 Extract Constant ExtensionRaw => "I.ExtensionRaw".
@@ -1309,17 +1926,14 @@ Extract Constant TLS13 => "T.TLS13".
 Extract Constant extensionRaw_KeyShare => "I.ExtensionRaw I.extensionID_KeyShare".
 Extract Constant extensionRaw_SupportedVersions =>
 "I.ExtensionRaw I.extensionID_SupportedVersions".
-Extract Constant handshake13 => "I.Handshake13".
-Extract Constant serverHello13 => "(\b -> I.ServerHello13 (I.ServerRandom {I.unServerRandom = b}))".
 
 Extract Constant extension_KeyShare =>
 "(\exts -> case Helper.extensionLookup I.extensionID_KeyShare exts GHC.Base.>>= I.extensionDecode I.MsgTClientHello of { GHC.Base.Just (I.KeyShareClientHello kses) -> GHC.Base.return kses})".
 Extract Constant serverGroups => "Helper.serverGroups".
 Extract Constant changeCipherSpec => "\p -> case p of { I.ChangeCipherSpec13 -> GHC.Base.Just (); _ -> GHC.Base.Nothing }".
 Extract Constant extension_SignatureAlgorithms =>
-"(\exts -> case Helper.extensionLookup I.extensionID_SignatureAlgorithms exts GHC.Base.>>= I.extensionDecode I.MsgTClientHello of { GHC.Base.Just (I.SignatureAlgorithms sas) -> sas })".
+"(\exts -> case Helper.extensionLookup I.extensionID_SignatureAlgorithms exts GHC.Base.>>= I.extensionDecode I.MsgTClientHello of { GHC.Base.Just (I.SignatureAlgorithms sas) -> GHC.Base.Just sas; _ -> GHC.Base.Nothing })".
 Extract Constant defaultCertChain => "Helper.defaultCertChain".
-Extract Constant certificate13 => "I.Certificate13".
 Extract Constant empty => "B.empty".
 Extract Constant PublicKey => "X.PubKey".
 Extract Constant PrivateKey => "X.PrivKey".
@@ -1331,7 +1945,6 @@ Extract Constant cipherID => "T.cipherID".
 Extract Constant CipherID_beq => "(GHC.Base.==)".
 Extract Constant cipherHash => "T.cipherHash".
 Extract Constant serverCiphers => "I.ciphersuite_13".
-Extract Constant encryptedExtensions13 => "I.EncryptedExtensions13".
 Extract Constant sniExt => "Helper.sniExt".
 Extract Constant CryptoError => "I.CryptoError".
 Extract Constant encodeGroupPublic => "I.encodeGroupPublic".
@@ -1339,6 +1952,7 @@ Extract Constant decodeGroupPublic => "\g bs -> case I.decodeGroupPublic g bs of
 Extract Constant ba_convert => "BA.convert".
 Extract Constant hashDigestSize => "I.hashDigestSize".
 Extract Constant Word8 => "Data.Word8.Word8".
+Extract Constant Word8_beq => "(GHC.Base.==)".
 Extract Constant b_replicate => "B.replicate".
 Extract Constant w0 => "Data.Word8._nul".
 Extract Constant hkdfExtract => "I.hkdfExtract".
@@ -1347,14 +1961,13 @@ Extract Constant s2b => "(\s -> B.pack (Prelude.map (\c -> Prelude.fromIntegral 
 Extract Constant b2s => "(\b -> Prelude.map Data.ByteString.Internal.w2c (B.unpack b))".
 Extract Constant GroupKey => "I.GroupKey".
 Extract Constant GroupPublic => "I.GroupPublic".
-Extract Constant finished13 => "I.Finished13".
 Extract Constant hmac => "I.hmac".
 Extract Constant ByteString_beq => "(GHC.Base.==)".
-Extract Constant appData13 => "I.AppData13".
 Extract Constant isDigitalSignaturePair => "I.isDigitalSignaturePair".
 Extract Constant signatureCompatible13 => "I.signatureCompatible13".
 Extract Constant certPubKey => "X.certPubKey".
 Extract Constant Word32 => "Data.Word.Word32".
+Extract Constant Word64 => "Data.Word.Word64".
 Extract Constant Signature => "I.Signature".
 Extract Constant KeyUpdate => "I.KeyUpdate".
 Extract Constant Bsplit => "B.splitAt".
@@ -1362,20 +1975,29 @@ Extract Constant Blength => "B.length".
 Extract Constant Hash_beq => "(GHC.Base.==)".
 Extract Constant ExtensionRaw_PreSharedKey =>
 "I.ExtensionRaw I.extensionID_PreSharedKey".
-Extract Constant CompressionID => "Data.Word8.Word8".
-Extract Constant TicketInfo => "T.TLS13TicketInfo".
+Extract Inductive TicketInfo => "T.TLS13TicketInfo" ["T.TLS13TicketInfo"].
 Extract Constant encodeHandshake13 => "I.encodeHandshake13".
 Extract Constant extension_PreSharedKey =>
 "\exts -> Helper.extensionLookup I.extensionID_PreSharedKey exts GHC.Base.>>= I.extensionDecode I.MsgTClientHello".
 Extract Constant nat2Word32 => "Prelude.fromIntegral".
 Extract Constant extension_PskKeyModes =>
-"(\exts -> case Helper.extensionLookup I.extensionID_PskKeyExchangeModes exts GHC.Base.>>= I.extensionDecode I.MsgTClientHello of { GHC.Base.Just (I.PskKeyExchangeModes ms) -> GHC.Base.return ms; GHC.Base.Nothing -> []})".
+"(\exts -> case Helper.extensionLookup I.extensionID_PskKeyExchangeModes exts GHC.Base.>>= I.extensionDecode I.MsgTClientHello of { GHC.Base.Just (I.PskKeyExchangeModes ms) -> GHC.Base.return ms; GHC.Base.Nothing -> GHC.Base.return []})".
 Extract Constant Btake => "B.take".
-Extract Constant dummyCompressionID => "Prelude.fromIntegral 0".
-Extract Constant packet2tinfo => "Helper.packet2tinfo".
 Extract Constant extensionEncode_PreSharedKey => "I.extensionEncode".
-Extract Constant lifetime => "172800".
-Extract Constant addAge => "100000".
+Extract Constant life => "172800".
+Extract Constant Word64gt => "(Prelude.>)".
+Extract Constant Word32le => "(Prelude.<=)".
+Extract Constant w64_2000 => "2000".
+Extract Constant extension_ServerName => "\exts -> Helper.extensionLookup I.extensionID_ServerName exts GHC.Base.>>= I.extensionDecode I.MsgTClientHello".
+Extract Constant Word64minus => "(Prelude.-)".
+Extract Constant w32to64 => "Prelude.fromIntegral".
+Extract Constant Word32minus => "(Prelude.-)".
+Extract Constant maxCiphertextSize => "16384".
+Extract Constant bytes2w32 => "B.foldl' (\x y -> x Prelude.* 256 Prelude.+ Prelude.fromIntegral y) 0".
+Extract Constant Version_beq => "(Prelude.==)".
+Extract Constant Word64plus => "(Prelude.+)".
+Extract Constant extension_SupportedVersionsCH => "\exts -> case Helper.extensionLookup I.extensionID_SupportedVersions exts GHC.Base.>>= I.extensionDecode I.MsgTClientHello of {GHC.Base.Just (I.SupportedVersionsClientHello vers) -> GHC.Base.Just vers; _ -> GHC.Base.Nothing }".
+Extract Constant Word64max => "Prelude.max".
 
 Require Extraction.
 Extraction Language Haskell.

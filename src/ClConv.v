@@ -400,7 +400,7 @@ Ltac st_op_to_ev :=
 Lemma derive_bind :
   forall state C D E (eff : Set)(args rets : eff -> Set) P
          (step : step_type args rets C state) c p st op st' op' ,
-    (@equiv' _ args rets C E state step (fun st op o => st = st' o /\ op = op' o) st c op) ->
+    (@equiv' _ args rets C E state step (fun st'' op'' o => st'' = st' o /\ op'' = op' o) st c op) ->
     (forall r, equiv' step P (st' r) (p r) (op' r)) ->
     @equiv' _ args rets C D state step P st (bind c p) op.
 Proof.
@@ -697,7 +697,8 @@ Ltac dest_step :=
         |- ?lhs = ?rhs =>
         lazymatch ef with
         | yield =>
-          enough (lhs = const rhs yield) by (unfold const; assumption)
+          change (lhs = const rhs yield)
+          || enough (lhs = const rhs yield) by (unfold const; assumption)
         | _ => change rhs with (lift_eff ef rhs ef)
         end
       end;
@@ -706,7 +707,11 @@ Ltac dest_step :=
       cbv beta iota;
       repeat (dest_sum; unfold sum_merge; cbv beta iota);
       unify_fun
-  | |- _ ?r = _ => repeat (dest_sum; unfold sum_merge; cbv beta iota); unify_fun
+  | |- _ ?r = _ =>
+    lazymatch goal with
+      |- ?lhs = _ =>
+      repeat (dest_sum; unfold sum_merge; cbv beta iota); unify_fun
+    end
   end.
 
 Lemma bind_if : forall C D (b:bool)(p q : t args_effect rets_effect C)(r : C -> t args_effect rets_effect D),
@@ -723,21 +728,11 @@ Ltac derive_core' state' rel ptr env :=
     |- equiv' _ _ _ ?prog _ =>
     lazymatch prog with
     | @Eff _ ?args ?rets ?C ?e _ _ =>
-      lazymatch C with
-(*      | unit =>
-        let fv := free_var prog env in
-        eapply (Equiv'Eff (ptr (inl fv)) e);
-        [ let H := fresh in
-          intro H;
-          derive_core (fun x => ptr (inr x)) (fv,H)
-        | intros; dest_step]*)
-      | _ =>
-        eapply (Equiv'Eff (ptr (inl env)) e);
-        [ let H := fresh in
-          intro H;
-          derive_core' state' rel (fun x => ptr (inr x)) (env,H)
-        | intros; dest_step]
-      end
+      eapply (Equiv'Eff (ptr (inl env)) e);
+      [ let H := fresh in
+        intro H;
+        derive_core' state' rel (fun x => ptr (inr x)) (env,H)
+      | intros; dest_step]
     | Return _ =>
       idtac
     | bind ?c _ =>
@@ -833,12 +828,43 @@ Ltac derive_core' state' rel ptr env :=
     end
   end|unify_fun..].
 
+Definition Def {A B : Set} (a : A)(f : A -> B) := f a.
+
 Ltac derive_core ptr env :=
   st_op_to_ev;[
-  lazymatch goal with
-    |- equiv' _ _ _ ?prog _ =>
+    (solve [repeat match goal with
+                   | H : ?p |- _ =>
+                     match type of p with
+                     | Prop =>
+                       match p with
+                       | forall _, _ => eapply (H _)
+                       | equiv' _ _ _ _ _ => apply H
+                       end
+                     end
+                   end])
+    ||
+    lazymatch goal with
+    |- equiv' ?step ?P _ ?prog _ =>
     idtac "foo";
     lazymatch prog with
+    | Def ?c ?p =>
+      lazymatch c with
+      | (fun _ => _) =>
+        eassert (forall a, equiv' step P _ (c a) _);
+        [ intro;
+          derive_core ptr env
+        | unfold Def at 1;
+          let ptr := next_ptr open_constr:(fun _x => _x) in
+          derive_core ptr env
+        ]
+      | _ =>
+        eassert (equiv' step P _ c _);
+        [ derive_core ptr env
+        | unfold Def at 1;
+          let ptr := next_ptr open_constr:(fun _x => _x) in
+          derive_core ptr env
+        ]
+      end
     | @Eff _ ?args ?rets ?C ?e _ _ =>
       let fv := free_var prog env in
       eapply (Equiv'Eff (ptr (inl fv)) e);
@@ -849,37 +875,17 @@ Ltac derive_core ptr env :=
     | Return _ =>
       idtac
     | bind ?c _ =>
-      (let _s := next_state in
-      lazymatch _s with
-        (?stateF, ?ptr, ?stepF) =>
-        eapply (derive_bind _ (fun _ => _) (fun _ => _));
-          [ assert (dmmy env) by (unfold dmmy; exact I);
-            let ptr := next_ptr open_constr:(fun _x => _x) in
-            derive_core ptr env
-          | let r := fresh in
-            intro r;
-            let _ := constr:(r) in
-            cbv beta;
-            let ptr := next_ptr open_constr:(fun _x => _x) in
-            derive_core ptr (env,r)
-          ]
-      end)
-      || (let c' := (eval red in c) in
-          change c with c';let _s := next_state in
-      lazymatch _s with
-        (?stateF, ?ptr, ?stepF) =>
-        eapply (derive_bind _ (fun _ => _) (fun _ => _));
-          [ assert (dmmy env) by (unfold dmmy; exact I);
-            let ptr := next_ptr open_constr:(fun _x => _x) in
-            derive_core ptr env
-          | let r := fresh in
-            intro r;
-            let _ := constr:(r) in
-            cbv beta;
-            let ptr := next_ptr open_constr:(fun _x => _x) in
-            derive_core ptr (env,r)
-          ]
-      end)
+      let fv := free_var prog env in
+      eapply (derive_bind _ (fun _ => _) (fun _ => _));
+      [ assert (dmmy fv) by (unfold dmmy; exact I);
+        let ptr := next_ptr open_constr:(fun _x => _x) in
+        derive_core ptr fv
+      | let r := fresh in
+        intro r;
+        cbv beta;
+        let ptr := next_ptr open_constr:(fun _x => _x) in
+        derive_core ptr (fv,r)
+      ]
     | seqE' _ _ _ =>
       eapply (derive_seqE' _ (fun s v => _) (fun s v => _) (fun s v => _));
       [ let s := fresh in
@@ -926,13 +932,7 @@ Ltac derive_core ptr env :=
       intros _a _b;
       derive_core ptr (env,_a,_b)
     | nat_rect_nondep _ _ _ _ =>
-      (solve [repeat match goal with
-                     | H : ?p |- _ =>
-                       match type of p with
-                       | Prop => apply H
-                       end
-                     end])
-      ||
+      idtac "natrect";
       (eapply (derive_nat_rect _ _ (fun a b => _) (fun a => _) (fun a => _));
        [ let a := fresh in
          intro a;
@@ -966,7 +966,10 @@ Ltac derive_core ptr env :=
          cbv beta;
          let ptr := next_ptr open_constr:(fun _x => _x) in
          derive_core ptr (env,b,l,a)
-       ])
+      ])
+    | _ => let prog' := (eval red in prog) in
+           change prog with prog';
+           derive_core ptr env
     end
   end|unify_fun..].
 
@@ -1015,6 +1018,23 @@ Definition option_branch A B (f:A -> B) f0 o :=
   | None => f0
   end.
 
+Ltac sum_match_fun_l expr :=
+  lazymatch expr with
+  | (match ?o with inl _ => _ | inr _ => _ end) =>
+    lazymatch eval pattern o in expr with
+    | ?F _ => eval cbv beta iota in (fun a => F (inl a))
+    end
+  end.
+
+Ltac sum_match_fun_r expr :=
+  lazymatch expr with
+  | (match ?o with inl _ => _ | inr _ => _ end) =>
+    lazymatch eval pattern o in expr with
+    | ?F _ => eval cbv beta iota in (fun a => F (inr a))
+    end
+  end.
+
+
 Ltac to_dummy i p :=
   lazymatch p with
   | pipe ?c ?f =>
@@ -1053,12 +1073,33 @@ Ltac to_dummy i p :=
     | _ =>
       constr:((@seq_abs A B eff args rets D state step z (coro_type step) c, f))
     end
-  | @bind ?T ?S ?eff ?args ?rets ?p ?f =>
+  | @bind ?T ?T' ?eff ?args ?rets ?p ?f =>
     let x :=  (eval cbv beta in (f (dummy _ _ i))) in
     let d := to_dummy (S i) x in
     lazymatch (eval pattern (dummy _ T i) in d) with
     | ?g _ =>
-      constr:((@bind T S eff args rets p, g))
+      constr:((@bind T T' eff args rets p, g))
+    end
+  | (match ?o with inl _ => _ | inr _ => _ end) =>
+    let fl := sum_match_fun_l p in
+    let fr := sum_match_fun_r p in
+    let ty := type of fl in
+    lazymatch ty with
+    | ?A -> _ =>
+      let ty' := type of fr in
+      lazymatch ty' with
+      | ?B -> _ =>
+        let xl := (eval cbv beta in (fl (dummy _ _ i))) in
+        let xr := (eval cbv beta in (fr (dummy _ _ i))) in
+        let dl := to_dummy (S i) xl in
+        let dr := to_dummy (S i) xr in
+        lazymatch (eval pattern (dummy _ A i) in dl) with
+        | ?gl _ =>
+          lazymatch (eval pattern (dummy _ B i) in dr) with
+          | ?gr _ => constr:((@sum_merge A B, gl, gr, o))
+          end
+        end
+      end
     end
   | (match ?o with Some _ => _ | None => ?f0 end) =>
     let f := opt_match_fun p in
@@ -1161,6 +1202,17 @@ Ltac reconstruct tree i :=
     | ?g' _ =>
       constr:(@bind T S eff args rets p g')
     end
+  | (@sum_merge ?A ?B, ?fl, ?fr, ?o) =>
+    let xl := (eval cbv beta in (fl (dummy _ _ i))) in
+    let ql := reconstruct xl (S i) in
+    let xr := (eval cbv beta in (fr (dummy _ _ i))) in
+    let qr := reconstruct xr (S i) in
+    lazymatch (eval pattern (dummy _ A i) in ql) with
+    | ?pl' _ =>
+      lazymatch (eval pattern (dummy _ B i) in qr) with
+      | ?pr' _ => constr:(@sum_merge A B _ pl' pr' o)
+      end
+    end
   | (@option_branch ?A ?B, ?f, ?f0, ?o) =>
     let q := reconstruct f0 i in
     let x := (eval cbv beta in (f (dummy _ _ i))) in
@@ -1241,7 +1293,7 @@ Ltac derive_coro env :=
    *)
   unfold sum_merge;
   lazymatch goal with
-    |- _ ?init _ =>
+    |- _ ?step ?init _ =>
     let u := open_constr:(inl env) in
     unify init u
   end;
@@ -1249,9 +1301,9 @@ Ltac derive_coro env :=
   repeat eexists; try econstructor;
   [ intro r; derive_core open_constr:(fun x => inr x) (env,r);
     lazymatch goal with
-      |- equiv' ?step _ _ (Return ?r) _ =>
+      |- equiv' ?step ?P _ (Return ?r) _ =>
       (let ptr := next_ptr open_constr:(fun x => x) in
-       eapply (Equiv'Return step _ (ptr r));
+       eapply (Equiv'Return _ _ (ptr r));
        simpl;
        split;
        lazymatch goal with
@@ -1260,7 +1312,7 @@ Ltac derive_coro env :=
          eapply eq_refl
        | _ => eapply eq_refl
        end)
-      || (eapply (Equiv'Return step);
+      || (eapply Equiv'Return;
           simpl;
           split;
           lazymatch goal with
@@ -1383,7 +1435,7 @@ Definition ex_coroutine2 n : t (const_yield nat) (const_yield nat) unit :=
     o <<- ex_coro' k'';
     match o with
     | Some k =>
-      o' <<- ex_coro' k;
+      _ <- yield k;
         Return tt
     | None => Return tt
     end.
@@ -1557,6 +1609,29 @@ Notation "'let_coro' x := c 'in' p" :=
     (at level 200, only parsing).
 
 Ltac mid_eq_core :=
+  discriminate
+  || dest_match
+  || proc_step
+  || apply eq_refl
+  || (progress (repeat match goal with
+                       | H : _ |- _ => apply H
+                       end);
+      ((simpl in *; congruence) || solve [eauto with foldable equivc] || solve [simpl; eauto]))
+  || generalize_and_ind
+  || lazymatch goal with
+       |- Eff ?e ?a ?f = Eff _ _ ?f0 =>
+       apply (@f_equal _ _ (fun x => Eff e a x) f f0);
+       let H := fresh in
+       extensionality H
+     | |- bind ?a ?p  = bind _ ?p0 =>
+       apply (@f_equal _ _ (fun x => bind a x) p p0);
+       let H := fresh in
+       extensionality H
+     end
+  || eauto with foldable equivc.
+
+(*
+Ltac mid_eq_core :=
   dest_match
   || proc_step
   || (repeat match goal with
@@ -1577,6 +1652,7 @@ Ltac mid_eq_core :=
        let H := fresh in
        extensionality H
      end.
+*)
 
 Definition loop_ex (p : nat * nat)(n i : nat) : t args_effect rets_effect (option unit):=
   let_coro c0 := ex_coroutine 0 in
@@ -1601,7 +1677,7 @@ Definition loop_ex (p : nat * nat)(n i : nat) : t args_effect rets_effect (optio
 
 Ltac derive' env :=
   lazymatch goal with
-    |- equiv _ ?init ?x =>
+    |- equiv ?step ?init ?x =>
     let u := open_constr:(inl env) in
     unfold sum_merge;
     simpl;
@@ -1686,7 +1762,7 @@ Defined.
 
 Ltac derive env :=
   lazymatch goal with
-    |- equiv _ ?init ?x =>
+    |- equiv ?step ?init ?x =>
     let u := open_constr:(inl env) in
     unify init u;
     let H := fresh in
@@ -1701,9 +1777,9 @@ Ltac derive env :=
     unfold step_state;
     repeat eexists;
     [ dest_step
-    | unfold option_branch;
+    | unfold option_branch, sum_merge;
       derive_core open_constr:(fun a => inr a) env ]
-  | |- _ ?init _ =>
+  | |- _ ?step ?init _ =>
     let u := open_constr:(inl env) in
     unify init u;
     econstructor;

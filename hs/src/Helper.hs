@@ -79,7 +79,7 @@ recordToPacket (Record ProtocolType_Handshake _ fragment) =
 test :: IORef Bool
 test = unsafePerformIO $ newIORef False
 
-decodeRecord :: Header -> Maybe (((Hash, Cipher), B.ByteString), Int) -> B.ByteString -> Maybe Packet13
+decodeRecord :: Header -> Maybe (((Hash, Cipher), B.ByteString), Int) -> B.ByteString -> Either (AlertLevel, AlertDescription) Packet13
 decodeRecord header m msg =
   let rst =
         case m of
@@ -103,7 +103,13 @@ decodeRecord header m msg =
                 , stCompression = nullCompression
                 }
   in
-  case runRecordM (decodeRecordM header msg) newRecordOptions rst of
-    Left _ -> unsafePerformIO (writeIORef test True >> readIORef test >>= \t -> if t then return Nothing else return Nothing)
-    Right (a,_) -> recordToPacket a
+  if B.length msg > 16384 then
+    Left (AlertLevel_Fatal, RecordOverflow)
+  else
+    case runRecordM (decodeRecordM header msg) newRecordOptions rst of
+      Left _ -> Left (AlertLevel_Fatal, BadRecordMac)
+      Right (a,_) ->
+        case recordToPacket a of
+          Just p -> Right p
+          Nothing -> Left (AlertLevel_Fatal, DecodeError)
     
