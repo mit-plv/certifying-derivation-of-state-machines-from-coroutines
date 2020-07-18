@@ -573,7 +573,7 @@ extensionRaw_SupportedVersions = I.ExtensionRaw I.extensionID_SupportedVersions
 
 extension_SignatureAlgorithms :: (([]) ExtensionRaw) -> GHC.Base.Maybe
                                  (([]) HashAndSignatureAlgorithm)
-extension_SignatureAlgorithms = (\exts -> case Helper.extensionLookup I.extensionID_SignatureAlgorithms exts GHC.Base.>>= I.extensionDecode I.MsgTClientHello of { GHC.Base.Just (I.SignatureAlgorithms sas) -> GHC.Base.Just sas ; _ -> GHC.Base.Nothing })
+extension_SignatureAlgorithms = (\exts -> case Helper.extensionLookup I.extensionID_SignatureAlgorithms exts GHC.Base.>>= I.extensionDecode I.MsgTClientHello of { GHC.Base.Just (I.SignatureAlgorithms sas) -> GHC.Base.Just sas; _ -> GHC.Base.Nothing })
 
 getCertificates :: CertificateChain -> ([]) Certificate
 getCertificates = \cch -> case cch of { X.CertificateChain certs -> Prelude.map X.getCertificate certs }
@@ -677,6 +677,10 @@ decideCredInfo priv certs hashSigs =
         GHC.Base.Nothing -> aux rest}}}
   in aux (filter isHashSignatureValid hashSigs)
 
+lF :: Prelude.String
+lF =
+  (:) '\n' ([])
+
 mconcat :: (([]) ByteString) -> ByteString
 mconcat = B.concat
 
@@ -704,6 +708,8 @@ estimatedRTT :: T.TLS13TicketInfo -> GHC.Base.Maybe Word64
 estimatedRTT t =
   case t of {
    T.TLS13TicketInfo _ _ _ estimatedRTT0 -> estimatedRTT0}
+
+type CompressionID = T.CompressionID
 
 sessionCipher :: I.SessionData -> CipherID
 sessionCipher s =
@@ -758,18 +764,6 @@ retAlert p =
    RetAlert a -> GHC.Base.Just a;
    _ -> GHC.Base.Nothing}
 
-fromSetSecret :: Rets_tls -> GHC.Base.Maybe ()
-fromSetSecret p =
-  case p of {
-   FromSetSecret -> GHC.Base.Just ();
-   _ -> GHC.Base.Nothing}
-
-fromSetPSK :: Rets_tls -> GHC.Base.Maybe ()
-fromSetPSK p =
-  case p of {
-   FromSetPSK -> GHC.Base.Just ();
-   _ -> GHC.Base.Nothing}
-
 fromSessionResume :: Rets_tls -> GHC.Base.Maybe (GHC.Base.Maybe I.SessionData)
 fromSessionResume p =
   case p of {
@@ -813,16 +807,11 @@ fromRecvClientHello p =
    FromRecvClientHello a -> GHC.Base.Just a;
    _ -> GHC.Base.Nothing}
 
-fromRecvCCS :: Rets_tls -> GHC.Base.Maybe ()
-fromRecvCCS p =
-  case p of {
-   FromRecvCCS -> GHC.Base.Just ();
-   _ -> GHC.Base.Nothing}
-
+fromRecvFinished :: Rets_tls -> GHC.Base.Maybe ByteString
 fromRecvFinished p =
   case p of {
-    FromRecvFinished a -> GHC.Base.Just a;
-    _ -> GHC.Base.Nothing}
+   FromRecvFinished a -> GHC.Base.Just a;
+   _ -> GHC.Base.Nothing}
 
 fromRecvAppData :: Rets_tls -> GHC.Base.Maybe ByteString
 fromRecvAppData p =
@@ -846,9 +835,6 @@ hdReadLen :: I.Header -> GHC.Base.Int
 hdReadLen hd =
   case hd of {
    I.Header _ _ n -> Prelude.fromIntegral n}
-
-decodeHeader :: ByteString -> GHC.Base.Maybe I.Header
-decodeHeader = \bs -> case I.decodeHeader bs of { Prelude.Left _ -> GHC.Base.Nothing ; Prelude.Right a -> GHC.Base.Just a }
 
 decodeRecord :: I.Header -> (GHC.Base.Maybe
                 ((,) ((,) ((,) Hash Cipher) ByteString) GHC.Base.Int)) -> ByteString
@@ -989,21 +975,12 @@ chooseServerName exts =
                        I.ServerName ns -> chooseServerName' ns};
    GHC.Base.Nothing -> GHC.Base.Nothing}
 
-encodeHandshake13 :: I.Handshake13 -> ByteString
-encodeHandshake13 = I.encodeHandshake13
-
 extension_PskKeyModes :: (([]) ExtensionRaw) -> GHC.Base.Maybe (([]) I.PskKexMode)
 extension_PskKeyModes = (\exts -> case Helper.extensionLookup I.extensionID_PskKeyExchangeModes exts GHC.Base.>>= I.extensionDecode I.MsgTClientHello of { GHC.Base.Just (I.PskKeyExchangeModes ms) -> GHC.Base.return ms; GHC.Base.Nothing -> GHC.Base.return []})
 
 extension_SupportedVersionsCH :: (([]) ExtensionRaw) -> GHC.Base.Maybe
                                  (([]) Version)
 extension_SupportedVersionsCH = \exts -> case Helper.extensionLookup I.extensionID_SupportedVersions exts GHC.Base.>>= I.extensionDecode I.MsgTClientHello of {GHC.Base.Just (I.SupportedVersionsClientHello vers) -> GHC.Base.Just vers; _ -> GHC.Base.Nothing }
-
-bytes2w32 :: ByteString -> Word32
-bytes2w32 = B.foldl' (\x y -> x Prelude.* 256 Prelude.+ Prelude.fromIntegral y) 0
-
-life :: Word32
-life = 172800
 
 doHandshake_derive :: SigT ()
                       (SigT (Step_type () Args_tls Rets_tls () Any)
@@ -1027,9 +1004,8 @@ doHandshake_derive =
            (Prelude.Right (Prelude.Right (Prelude.Right (Prelude.Right
            (Prelude.Right (Prelude.Right (Prelude.Right (Prelude.Right
            (Prelude.Right (Prelude.Right (Prelude.Right (Prelude.Right
-           (Prelude.Right (Prelude.Right (Prelude.Right (Prelude.Right
            (Prelude.Right
-           (inhabitant unit_inhabitant))))))))))))))))))))))))))))))))))))})
+           (inhabitant unit_inhabitant))))))))))))))))))))))))))))))))})
         (case fromSendPacket r of {
           GHC.Base.Just _ -> GHC.Base.Just (ExistT __ (Close ()));
           GHC.Base.Nothing -> GHC.Base.Nothing})))
@@ -1040,8 +1016,7 @@ doHandshake_derive =
           (Prelude.Right (Prelude.Right (Prelude.Right (Prelude.Right (Prelude.Right
           (Prelude.Right (Prelude.Right (Prelude.Right (Prelude.Right (Prelude.Right
           (Prelude.Right (Prelude.Right (Prelude.Right (Prelude.Right (Prelude.Right
-          (Prelude.Right (Prelude.Right (Prelude.Right (Prelude.Right
-          ())))))))))))))))))))))))))))))))))))) GHC.Base.Nothing))
+          ())))))))))))))))))))))))))))))))) GHC.Base.Nothing))
           (sum_merge
             (prod_curry
               (prod_curry (\_ c p _ r -> Prelude.Left ((,)
@@ -1080,8 +1055,7 @@ doHandshake_derive =
                      (Prelude.Right (Prelude.Right (Prelude.Right (Prelude.Right
                      (Prelude.Right (Prelude.Right (Prelude.Right (Prelude.Right
                      (Prelude.Right (Prelude.Right (Prelude.Right (Prelude.Right
-                     (Prelude.Right (Prelude.Right (Prelude.Right (Prelude.Right
-                     (Prelude.Left ((,) () a))))))))))))))))))))))))))))))))))));
+                     (Prelude.Left ((,) () a))))))))))))))))))))))))))))))));
                     GHC.Base.Nothing -> Prelude.Right (Prelude.Right (Prelude.Right
                      (Prelude.Right (Prelude.Right (Prelude.Right (Prelude.Right
                      (Prelude.Right (Prelude.Right (Prelude.Right (Prelude.Right
@@ -1090,9 +1064,8 @@ doHandshake_derive =
                      (Prelude.Right (Prelude.Right (Prelude.Right (Prelude.Right
                      (Prelude.Right (Prelude.Right (Prelude.Right (Prelude.Right
                      (Prelude.Right (Prelude.Right (Prelude.Right (Prelude.Right
-                     (Prelude.Right (Prelude.Right (Prelude.Right (Prelude.Right
                      (Prelude.Right
-                     (inhabitant unit_inhabitant))))))))))))))))))))))))))))))))))))}})
+                     (inhabitant unit_inhabitant))))))))))))))))))))))))))))))))}})
                 (case fromRecvClientHello r of {
                   GHC.Base.Just a ->
                    case a of {
@@ -1170,36 +1143,31 @@ doHandshake_derive =
                                                (Prelude.Right (Prelude.Right
                                                (Prelude.Right (Prelude.Right
                                                (Prelude.Right (Prelude.Right
-                                               (Prelude.Right (Prelude.Right
                                                (Prelude.Left ((,) ((,) ((,) ((,)
                                                ((,) ((,) ((,) ((,) ((,) ((,) ((,)
                                                ((,) () c) p) b) c0) c1) k) l) c2)
                                                a0)
                                                (b_replicate
                                                  (hashDigestSize (cipherHash c1))
-                                                 w0)) GHC.Base.Nothing) []))))))))))};
+                                                 w0)) GHC.Base.Nothing) []))))))))};
                                             GHC.Base.Nothing -> Prelude.Right
                                              (Prelude.Right (Prelude.Right
                                              (Prelude.Right (Prelude.Right
                                              (Prelude.Right (Prelude.Right
-                                             (Prelude.Right (Prelude.Right
                                              (Prelude.Left ((,) ((,) ((,) ((,) ((,)
                                              ((,) ((,) ((,) ((,) ((,) ((,) ((,) ()
                                              c) p) b) c0) c1) k) l) c2) a0)
                                              (b_replicate
                                                (hashDigestSize (cipherHash c1)) w0))
-                                             GHC.Base.Nothing) []))))))))))}}};
-                                      GHC.Base.Nothing ->Prelude.Right
-                                             (Prelude.Right (Prelude.Right
-                                             (Prelude.Right (Prelude.Right
-                                             (Prelude.Right (Prelude.Right
-                                             (Prelude.Right (Prelude.Right
-                                             (Prelude.Left ((,) ((,) ((,) ((,) ((,)
-                                             ((,) ((,) ((,) ((,) ((,) ((,) ((,) ()
-                                             c) p) b) c0) c1) k) l) c2) a0)
-                                             (b_replicate
-                                               (hashDigestSize (cipherHash c1)) w0))
-                                             GHC.Base.Nothing) []))))))))))};
+                                             GHC.Base.Nothing) []))))))))}}};
+                                      GHC.Base.Nothing -> Prelude.Right
+                                       (Prelude.Right (Prelude.Right (Prelude.Right
+                                       (Prelude.Right (Prelude.Right (Prelude.Right
+                                       (Prelude.Left ((,) ((,) ((,) ((,) ((,) ((,)
+                                       ((,) ((,) ((,) ((,) ((,) ((,) () c) p) b) c0)
+                                       c1) k) l) c2) a0)
+                                       (b_replicate (hashDigestSize (cipherHash c1))
+                                         w0)) GHC.Base.Nothing) []))))))))};
                                     GHC.Base.Nothing -> Prelude.Right (Prelude.Left
                                      ())};
                                   GHC.Base.Nothing -> Prelude.Right (Prelude.Right
@@ -1213,9 +1181,7 @@ doHandshake_derive =
                                    (Prelude.Right (Prelude.Right (Prelude.Right
                                    (Prelude.Right (Prelude.Right (Prelude.Right
                                    (Prelude.Right (Prelude.Right (Prelude.Right
-                                   (Prelude.Right (Prelude.Right (Prelude.Right
-                                   (Prelude.Right
-                                   (inhabitant unit_inhabitant))))))))))))))))))))))))))))))))))))})
+                                   (inhabitant unit_inhabitant))))))))))))))))))))))))))))))))})
                                 (case fromGroupGetPubShared r of {
                                   GHC.Base.Just a ->
                                    case a of {
@@ -1273,25 +1239,19 @@ doHandshake_derive =
                                              ((Prelude.+) 1 ((Prelude.+) 1
                                              ((Prelude.+) 1 ((Prelude.+) 1
                                              0))))))))))))))))))))))))))))))))))}}};
-                                      GHC.Base.Nothing -> GHC.Base.Just 
-                                        (ExistT __ (GetRandomBytes
-                                             ((Prelude.+) 1 ((Prelude.+) 1
-                                             ((Prelude.+) 1 ((Prelude.+) 1
-                                             ((Prelude.+) 1 ((Prelude.+) 1
-                                             ((Prelude.+) 1 ((Prelude.+) 1
-                                             ((Prelude.+) 1 ((Prelude.+) 1
-                                             ((Prelude.+) 1 ((Prelude.+) 1
-                                             ((Prelude.+) 1 ((Prelude.+) 1
-                                             ((Prelude.+) 1 ((Prelude.+) 1
-                                             ((Prelude.+) 1 ((Prelude.+) 1
-                                             ((Prelude.+) 1 ((Prelude.+) 1
-                                             ((Prelude.+) 1 ((Prelude.+) 1
-                                             ((Prelude.+) 1 ((Prelude.+) 1
-                                             ((Prelude.+) 1 ((Prelude.+) 1
-                                             ((Prelude.+) 1 ((Prelude.+) 1
-                                             ((Prelude.+) 1 ((Prelude.+) 1
-                                             ((Prelude.+) 1 ((Prelude.+) 1
-                                             0))))))))))))))))))))))))))))))))))};
+                                      GHC.Base.Nothing -> GHC.Base.Just (ExistT __
+                                       (GetRandomBytes ((Prelude.+) 1 ((Prelude.+) 1
+                                       ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
+                                       ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
+                                       ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
+                                       ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
+                                       ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
+                                       ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
+                                       ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
+                                       ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
+                                       ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
+                                       ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
+                                       0))))))))))))))))))))))))))))))))))};
                                     GHC.Base.Nothing -> GHC.Base.Just (ExistT __
                                      (SendPacket (I.Alert13 ((:) ((,)
                                      I.AlertLevel_Fatal I.IllegalParameter) []))))};
@@ -1329,17 +1289,14 @@ doHandshake_derive =
                                                  (Prelude.Right (Prelude.Right
                                                  (Prelude.Right (Prelude.Right
                                                  (Prelude.Right (Prelude.Right
-                                                 (Prelude.Right (Prelude.Right
                                                  (Prelude.Left ((,) ((,) ((,) ((,)
                                                  ((,) ((,) ((,) ((,) ((,) ((,) ((,)
                                                  ((,) () c) p) b) c0) c1) k) l) c2)
                                                  p0)
                                                  (b_replicate
                                                    (hashDigestSize (cipherHash c1))
-                                                   w0)) GHC.Base.Nothing)
-                                                 []))))))))))};
+                                                   w0)) GHC.Base.Nothing) []))))))))};
                                               GHC.Base.Nothing -> Prelude.Right
-                                               (Prelude.Right (Prelude.Right
                                                (Prelude.Right (Prelude.Right
                                                (Prelude.Right (Prelude.Right
                                                (Prelude.Right (Prelude.Right
@@ -1349,16 +1306,15 @@ doHandshake_derive =
                                                p0)
                                                (b_replicate
                                                  (hashDigestSize (cipherHash c1))
-                                                 w0)) GHC.Base.Nothing) []))))))))))};
+                                                 w0)) GHC.Base.Nothing) []))))))))};
                                             GHC.Base.Nothing -> Prelude.Right
-                                             (Prelude.Right (Prelude.Right
                                              (Prelude.Right (Prelude.Right
                                              (Prelude.Right (Prelude.Right
                                              (Prelude.Right (Prelude.Right
                                              (Prelude.Left ((,) ((,) ((,) ((,) ((,)
                                              ((,) ((,) ((,) ((,) ((,) ((,) ((,) ()
                                              c) p) b) c0) c1) k) l) c2) p0) empty)
-                                             GHC.Base.Nothing) []))))))))))})
+                                             GHC.Base.Nothing) []))))))))})
                                           (case fromSessionResume r of {
                                             GHC.Base.Just a ->
                                              case a of {
@@ -1486,7 +1442,6 @@ doHandshake_derive =
                                                      Prelude.Right (Prelude.Right
                                                      (Prelude.Right (Prelude.Right
                                                      (Prelude.Right (Prelude.Right
-                                                     (Prelude.Right (Prelude.Right
                                                      (Prelude.Right (Prelude.Left
                                                      ((,) ((,) ((,) ((,) ((,) ((,)
                                                      ((,) ((,) ((,) ((,) ((,) ((,)
@@ -1499,11 +1454,10 @@ doHandshake_derive =
                                                            add (blength x)
                                                              ((Prelude.+) 1 0)) l0))
                                                        ((Prelude.+) 1 ((Prelude.+) 1
-                                                       0)))))) a0))))))))));
+                                                       0)))))) a0))))))));
                                                     GHC.Base.False -> Prelude.Right
                                                      (Prelude.Left ())};
                                                   GHC.Base.False -> Prelude.Right
-                                                   (Prelude.Right (Prelude.Right
                                                    (Prelude.Right (Prelude.Right
                                                    (Prelude.Right (Prelude.Right
                                                    (Prelude.Right (Prelude.Right
@@ -1514,9 +1468,8 @@ doHandshake_derive =
                                                    (b_replicate
                                                      (hashDigestSize
                                                        (cipherHash c1)) w0))
-                                                   GHC.Base.Nothing) []))))))))))};
+                                                   GHC.Base.Nothing) []))))))))};
                                                 GHC.Base.Nothing -> Prelude.Right
-                                                 (Prelude.Right (Prelude.Right
                                                  (Prelude.Right (Prelude.Right
                                                  (Prelude.Right (Prelude.Right
                                                  (Prelude.Right (Prelude.Right
@@ -1524,7 +1477,7 @@ doHandshake_derive =
                                                  ((,) ((,) ((,) ((,) ((,) ((,) ((,)
                                                  ((,) () c) p) b) c0) c1) k) l) c2)
                                                  p0) empty) GHC.Base.Nothing)
-                                                 []))))))))))})
+                                                 []))))))))})
                                               (case fromGetCurrentTime r of {
                                                 GHC.Base.Just a ->
                                                  case andb
@@ -1631,81 +1584,56 @@ doHandshake_derive =
                               (prod_curry
                                 (prod_curry
                                   (prod_curry
-                                    (prod_curry (\_ c p b c0 c1 k l c2 p0 _ r ->
-                                      Prelude.Left ((,)
-                                      (case fromSendPacket r of {
-                                        GHC.Base.Just _ -> Prelude.Right
-                                         (Prelude.Right (Prelude.Right
-                                         (Prelude.Right (Prelude.Right
-                                         (Prelude.Right (Prelude.Right
-                                         (Prelude.Right (Prelude.Left ((,) ((,) ((,)
-                                         ((,) ((,) ((,) ((,) ((,) ((,) () c) p) b)
-                                         c0) c1) k) l) c2) p0)))))))));
-                                        GHC.Base.Nothing -> Prelude.Right
-                                         (Prelude.Right (Prelude.Right
-                                         (Prelude.Right (Prelude.Right
-                                         (Prelude.Right (Prelude.Right
-                                         (Prelude.Right (Prelude.Right (Prelude.Left
-                                         ((,) ((,) ((,) ((,) ((,) ((,) ((,) ((,)
-                                         ((,) ((,) ((,) ((,) () c) p) b) c0) c1) k)
-                                         l) c2) p0) empty) GHC.Base.Nothing)
-                                         []))))))))))})
-                                      (case fromSendPacket r of {
-                                        GHC.Base.Just _ -> GHC.Base.Just (ExistT __
-                                         (Close ()));
-                                        GHC.Base.Nothing -> GHC.Base.Just (ExistT __
-                                         (GetRandomBytes ((Prelude.+) 1
-                                         ((Prelude.+) 1 ((Prelude.+) 1
-                                         ((Prelude.+) 1 ((Prelude.+) 1
-                                         ((Prelude.+) 1 ((Prelude.+) 1
-                                         ((Prelude.+) 1 ((Prelude.+) 1
-                                         ((Prelude.+) 1 ((Prelude.+) 1
-                                         ((Prelude.+) 1 ((Prelude.+) 1
-                                         ((Prelude.+) 1 ((Prelude.+) 1
-                                         ((Prelude.+) 1 ((Prelude.+) 1
-                                         ((Prelude.+) 1 ((Prelude.+) 1
-                                         ((Prelude.+) 1 ((Prelude.+) 1
-                                         ((Prelude.+) 1 ((Prelude.+) 1
-                                         ((Prelude.+) 1 ((Prelude.+) 1
-                                         ((Prelude.+) 1 ((Prelude.+) 1
-                                         ((Prelude.+) 1 ((Prelude.+) 1
-                                         ((Prelude.+) 1 ((Prelude.+) 1
-                                         ((Prelude.+) 1
-                                         0))))))))))))))))))))))))))))))))))}))))))))))))
+                                    (prod_curry
+                                      (prod_curry
+                                        (prod_curry
+                                          (prod_curry
+                                            (\_ c p b c0 c1 k l c2 p0 b0 o l0 _ r ->
+                                            Prelude.Left ((,)
+                                            (case fromGetRandomBytes r of {
+                                              GHC.Base.Just a -> Prelude.Right
+                                               (Prelude.Right (Prelude.Right
+                                               (Prelude.Right (Prelude.Right
+                                               (Prelude.Right (Prelude.Right
+                                               (Prelude.Right (Prelude.Left ((,)
+                                               ((,) ((,) ((,) ((,) ((,) ((,) ((,)
+                                               ((,) ((,) ((,) ((,) ((,) () c) p) b)
+                                               c0) c1) k) l) c2) p0) b0) o) l0)
+                                               a)))))))));
+                                              GHC.Base.Nothing -> Prelude.Right
+                                               (Prelude.Right (Prelude.Right
+                                               (Prelude.Right (Prelude.Right
+                                               (Prelude.Right (Prelude.Right
+                                               (Prelude.Right (Prelude.Right
+                                               (Prelude.Right (Prelude.Right
+                                               (Prelude.Right (Prelude.Right
+                                               (Prelude.Right (Prelude.Right
+                                               (Prelude.Right (Prelude.Right
+                                               (Prelude.Right (Prelude.Right
+                                               (Prelude.Right (Prelude.Right
+                                               (Prelude.Right (Prelude.Right
+                                               (Prelude.Right (Prelude.Right
+                                               (Prelude.Right (Prelude.Right
+                                               (Prelude.Right (Prelude.Right
+                                               (Prelude.Right (Prelude.Right
+                                               (Prelude.Right
+                                               (inhabitant unit_inhabitant))))))))))))))))))))))))))))))))})
+                                            (case fromGetRandomBytes r of {
+                                              GHC.Base.Just a -> GHC.Base.Just
+                                               (ExistT __ (SendPacket (I.Handshake13
+                                               ((:) (I.ServerHello13 (I.ServerRandom
+                                               a) (chSess c0) (cipherID c1) ((:)
+                                               (extensionRaw_KeyShare
+                                                 (extensionEncode_KeyShare
+                                                   (I.KeyShareEntry (ksGroup k)
+                                                   (encodeGroupPublic (fst p0)))))
+                                               ((:)
+                                               (extensionRaw_SupportedVersions
+                                                 (extensionEncode_SupportedVersions
+                                                   tLS13)) l0))) []))));
+                                              GHC.Base.Nothing -> GHC.Base.Nothing})))))))))))))))
                     (sum_merge
                       (prod_curry
-                        (prod_curry
-                          (prod_curry
-                            (prod_curry
-                              (prod_curry
-                                (prod_curry
-                                  (prod_curry
-                                    (prod_curry
-                                      (prod_curry (\_ c p b c0 c1 k l c2 p0 _ _ ->
-                                        Prelude.Left ((,) (Prelude.Right
-                                        (Prelude.Right (Prelude.Right (Prelude.Right
-                                        (Prelude.Right (Prelude.Right (Prelude.Right
-                                        (Prelude.Right (Prelude.Right (Prelude.Left
-                                        ((,) ((,) ((,) ((,) ((,) ((,) ((,) ((,) ((,)
-                                        ((,) ((,) ((,) () c) p) b) c0) c1) k) l) c2)
-                                        p0)
-                                        (b_replicate
-                                          (hashDigestSize (cipherHash c1)) w0))
-                                        GHC.Base.Nothing) [])))))))))))
-                                        (GHC.Base.Just (ExistT __ (GetRandomBytes
-                                        ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
-                                        ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
-                                        ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
-                                        ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
-                                        ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
-                                        ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
-                                        ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
-                                        ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
-                                        ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
-                                        ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
-                                        ((Prelude.+) 1 ((Prelude.+) 1
-                                        0))))))))))))))))))))))))))))))))))))))))))))))
-                      (sum_merge
                         (prod_curry
                           (prod_curry
                             (prod_curry
@@ -1718,19 +1646,18 @@ doHandshake_derive =
                                           (prod_curry
                                             (prod_curry
                                               (prod_curry
-                                                (\_ c p b c0 c1 k l c2 p0 b0 o l0 _ r ->
+                                                (\_ c p b _ c0 _ l c1 p0 b0 o _ _ _ r ->
                                                 Prelude.Left ((,)
-                                                (case fromGetRandomBytes r of {
+                                                (case fromSendPacket r of {
                                                   GHC.Base.Just a -> Prelude.Right
                                                    (Prelude.Right (Prelude.Right
                                                    (Prelude.Right (Prelude.Right
                                                    (Prelude.Right (Prelude.Right
                                                    (Prelude.Right (Prelude.Right
-                                                   (Prelude.Right (Prelude.Left ((,)
-                                                   ((,) ((,) ((,) ((,) ((,) ((,)
+                                                   (Prelude.Left ((,) ((,) ((,) ((,)
                                                    ((,) ((,) ((,) ((,) ((,) ((,) ()
-                                                   c) p) b) c0) c1) k) l) c2) p0)
-                                                   b0) o) l0) a)))))))))));
+                                                   c) p) b) c0) l) c1) p0) b0) o)
+                                                   a))))))))));
                                                   GHC.Base.Nothing -> Prelude.Right
                                                    (Prelude.Right (Prelude.Right
                                                    (Prelude.Right (Prelude.Right
@@ -1747,26 +1674,84 @@ doHandshake_derive =
                                                    (Prelude.Right (Prelude.Right
                                                    (Prelude.Right (Prelude.Right
                                                    (Prelude.Right (Prelude.Right
-                                                   (Prelude.Right (Prelude.Right
-                                                   (Prelude.Right (Prelude.Right
                                                    (Prelude.Right
-                                                   (inhabitant unit_inhabitant))))))))))))))))))))))))))))))))))))})
-                                                (case fromGetRandomBytes r of {
-                                                  GHC.Base.Just a -> GHC.Base.Just
+                                                   (inhabitant unit_inhabitant))))))))))))))))))))))))))))))))})
+                                                (case fromSendPacket r of {
+                                                  GHC.Base.Just _ -> GHC.Base.Just
                                                    (ExistT __ (SendPacket
-                                                   (I.Handshake13 ((:)
-                                                   (I.ServerHello13 (I.ServerRandom
-                                                   a) (chSess c0) (cipherID c1) ((:)
-                                                   (extensionRaw_KeyShare
-                                                     (extensionEncode_KeyShare
-                                                       (I.KeyShareEntry (ksGroup k)
-                                                       (encodeGroupPublic (fst p0)))))
-                                                   ((:)
-                                                   (extensionRaw_SupportedVersions
-                                                     (extensionEncode_SupportedVersions
-                                                       tLS13)) l0))) []))));
+                                                   I.ChangeCipherSpec13));
                                                   GHC.Base.Nothing ->
-                                                   GHC.Base.Nothing})))))))))))))))
+                                                   GHC.Base.Nothing}))))))))))))))))
+                      (sum_merge
+                        (prod_curry
+                          (prod_curry
+                            (prod_curry
+                              (prod_curry
+                                (prod_curry
+                                  (prod_curry
+                                    (prod_curry
+                                      (prod_curry
+                                        (prod_curry
+                                          (prod_curry
+                                            (\_ c p b c0 l c1 p0 b0 o b1 _ r ->
+                                            Prelude.Left ((,)
+                                            (case fromSendPacket r of {
+                                              GHC.Base.Just _ -> Prelude.Right
+                                               (Prelude.Right (Prelude.Right
+                                               (Prelude.Right (Prelude.Right
+                                               (Prelude.Right (Prelude.Right
+                                               (Prelude.Right (Prelude.Right
+                                               (Prelude.Right (Prelude.Left ((,)
+                                               ((,) ((,) ((,) ((,) ((,) ((,) ((,)
+                                               ((,) ((,) () c) p) b) c0) l) c1) p0)
+                                               b0) o) b1)))))))))));
+                                              GHC.Base.Nothing -> Prelude.Right
+                                               (Prelude.Right (Prelude.Right
+                                               (Prelude.Right (Prelude.Right
+                                               (Prelude.Right (Prelude.Right
+                                               (Prelude.Right (Prelude.Right
+                                               (Prelude.Right (Prelude.Right
+                                               (Prelude.Right (Prelude.Right
+                                               (Prelude.Right (Prelude.Right
+                                               (Prelude.Right (Prelude.Right
+                                               (Prelude.Right (Prelude.Right
+                                               (Prelude.Right (Prelude.Right
+                                               (Prelude.Right (Prelude.Right
+                                               (Prelude.Right (Prelude.Right
+                                               (Prelude.Right (Prelude.Right
+                                               (Prelude.Right (Prelude.Right
+                                               (Prelude.Right (Prelude.Right
+                                               (Prelude.Right
+                                               (inhabitant unit_inhabitant))))))))))))))))))))))))))))))))})
+                                            (case fromSendPacket r of {
+                                              GHC.Base.Just _ -> GHC.Base.Just
+                                               (ExistT __ (SetSecret ((,) ((,) ((,)
+                                               (cipherHash c0) c0)
+                                               (hkdfExpandLabel (cipherHash c0)
+                                                 (hkdfExtract (cipherHash c0)
+                                                   (hkdfExpandLabel (cipherHash c0)
+                                                     (hkdfExtract (cipherHash c0)
+                                                       (b_replicate
+                                                         (hashDigestSize
+                                                           (cipherHash c0)) w0) b0)
+                                                     (s2b ((:) 'd' ((:) 'e' ((:) 'r'
+                                                       ((:) 'i' ((:) 'v' ((:) 'e'
+                                                       ((:) 'd' ([])))))))))
+                                                     (hashWith (cipherHash c0) ((:)
+                                                       (s2b ([])) []))
+                                                     (hashDigestSize
+                                                       (cipherHash c0)))
+                                                   (ba_convert (snd p0)))
+                                                 (s2b ((:) 's' ((:) ' ' ((:) 'h'
+                                                   ((:) 's' ((:) ' ' ((:) 't' ((:)
+                                                   'r' ((:) 'a' ((:) 'f' ((:) 'f'
+                                                   ((:) 'i' ((:) 'c'
+                                                   ([]))))))))))))))
+                                                 (hashWith (cipherHash c0) ((:) b
+                                                   ((:) b1 [])))
+                                                 (hashDigestSize (cipherHash c0))))
+                                               GHC.Base.False)));
+                                              GHC.Base.Nothing -> GHC.Base.Nothing})))))))))))))
                         (sum_merge
                           (prod_curry
                             (prod_curry
@@ -1778,50 +1763,22 @@ doHandshake_derive =
                                         (prod_curry
                                           (prod_curry
                                             (prod_curry
-                                              (prod_curry
-                                                (prod_curry
-                                                  (prod_curry
-                                                    (\_ c p b _ c0 _ l c1 p0 b0 o _ _ _ r ->
-                                                    Prelude.Left ((,)
-                                                    (case fromSendPacket r of {
-                                                      GHC.Base.Just a ->
-                                                       Prelude.Right (Prelude.Right
-                                                       (Prelude.Right (Prelude.Right
-                                                       (Prelude.Right (Prelude.Right
-                                                       (Prelude.Right (Prelude.Right
-                                                       (Prelude.Right (Prelude.Right
-                                                       (Prelude.Right (Prelude.Left
-                                                       ((,) ((,) ((,) ((,) ((,) ((,)
-                                                       ((,) ((,) ((,) ((,) () c) p)
-                                                       b) c0) l) c1) p0) b0) o)
-                                                       a))))))))))));
-                                                      GHC.Base.Nothing ->
-                                                       Prelude.Right (Prelude.Right
-                                                       (Prelude.Right (Prelude.Right
-                                                       (Prelude.Right (Prelude.Right
-                                                       (Prelude.Right (Prelude.Right
-                                                       (Prelude.Right (Prelude.Right
-                                                       (Prelude.Right (Prelude.Right
-                                                       (Prelude.Right (Prelude.Right
-                                                       (Prelude.Right (Prelude.Right
-                                                       (Prelude.Right (Prelude.Right
-                                                       (Prelude.Right (Prelude.Right
-                                                       (Prelude.Right (Prelude.Right
-                                                       (Prelude.Right (Prelude.Right
-                                                       (Prelude.Right (Prelude.Right
-                                                       (Prelude.Right (Prelude.Right
-                                                       (Prelude.Right (Prelude.Right
-                                                       (Prelude.Right (Prelude.Right
-                                                       (Prelude.Right (Prelude.Right
-                                                       (Prelude.Right (Prelude.Right
-                                                       (inhabitant unit_inhabitant))))))))))))))))))))))))))))))))))))})
-                                                    (case fromSendPacket r of {
-                                                      GHC.Base.Just _ ->
-                                                       GHC.Base.Just (ExistT __
-                                                       (SendPacket
-                                                       I.ChangeCipherSpec13));
-                                                      GHC.Base.Nothing ->
-                                                       GHC.Base.Nothing}))))))))))))))))
+                                              (\_ c p b c0 l c1 p0 b0 o b1 _ _ ->
+                                              Prelude.Left ((,) (Prelude.Right
+                                              (Prelude.Right (Prelude.Right
+                                              (Prelude.Right (Prelude.Right
+                                              (Prelude.Right (Prelude.Right
+                                              (Prelude.Right (Prelude.Right
+                                              (Prelude.Right (Prelude.Right
+                                              (Prelude.Left ((,) ((,) ((,) ((,) ((,)
+                                              ((,) ((,) ((,) ((,) ((,) () c) p) b)
+                                              c0) l) c1) p0) b0) o) b1)))))))))))))
+                                              (GHC.Base.Just (ExistT __ (SendPacket
+                                              (I.Handshake13 ((:)
+                                              (I.EncryptedExtensions13
+                                              (case chooseServerName (chExt c1) of {
+                                                GHC.Base.Just _ -> (:) sniExt [];
+                                                GHC.Base.Nothing -> []})) [])))))))))))))))))
                           (sum_merge
                             (prod_curry
                               (prod_curry
@@ -1836,85 +1793,8 @@ doHandshake_derive =
                                                 (\_ c p b c0 l c1 p0 b0 o b1 _ r ->
                                                 Prelude.Left ((,)
                                                 (case fromSendPacket r of {
-                                                  GHC.Base.Just _ -> Prelude.Right
-                                                   (Prelude.Right (Prelude.Right
-                                                   (Prelude.Right (Prelude.Right
-                                                   (Prelude.Right (Prelude.Right
-                                                   (Prelude.Right (Prelude.Right
-                                                   (Prelude.Right (Prelude.Right
-                                                   (Prelude.Right (Prelude.Left ((,)
-                                                   ((,) ((,) ((,) ((,) ((,) ((,)
-                                                   ((,) ((,) ((,) () c) p) b) c0) l)
-                                                   c1) p0) b0) o) b1)))))))))))));
-                                                  GHC.Base.Nothing -> Prelude.Right
-                                                   (Prelude.Right (Prelude.Right
-                                                   (Prelude.Right (Prelude.Right
-                                                   (Prelude.Right (Prelude.Right
-                                                   (Prelude.Right (Prelude.Right
-                                                   (Prelude.Right (Prelude.Right
-                                                   (Prelude.Right (Prelude.Right
-                                                   (Prelude.Right (Prelude.Right
-                                                   (Prelude.Right (Prelude.Right
-                                                   (Prelude.Right (Prelude.Right
-                                                   (Prelude.Right (Prelude.Right
-                                                   (Prelude.Right (Prelude.Right
-                                                   (Prelude.Right (Prelude.Right
-                                                   (Prelude.Right (Prelude.Right
-                                                   (Prelude.Right (Prelude.Right
-                                                   (Prelude.Right (Prelude.Right
-                                                   (Prelude.Right (Prelude.Right
-                                                   (Prelude.Right (Prelude.Right
-                                                   (Prelude.Right
-                                                   (inhabitant unit_inhabitant))))))))))))))))))))))))))))))))))))})
-                                                (case fromSendPacket r of {
-                                                  GHC.Base.Just _ -> GHC.Base.Just
-                                                   (ExistT __ (SetSecret ((,) ((,)
-                                                   ((,) (cipherHash c0) c0)
-                                                   (hkdfExpandLabel (cipherHash c0)
-                                                     (hkdfExtract (cipherHash c0)
-                                                       (hkdfExpandLabel
-                                                         (cipherHash c0)
-                                                         (hkdfExtract
-                                                           (cipherHash c0)
-                                                           (b_replicate
-                                                             (hashDigestSize
-                                                               (cipherHash c0)) w0)
-                                                           b0)
-                                                         (s2b ((:) 'd' ((:) 'e' ((:)
-                                                           'r' ((:) 'i' ((:) 'v'
-                                                           ((:) 'e' ((:) 'd'
-                                                           ([])))))))))
-                                                         (hashWith (cipherHash c0)
-                                                           ((:) (s2b ([])) []))
-                                                         (hashDigestSize
-                                                           (cipherHash c0)))
-                                                       (ba_convert (snd p0)))
-                                                     (s2b ((:) 's' ((:) ' ' ((:) 'h'
-                                                       ((:) 's' ((:) ' ' ((:) 't'
-                                                       ((:) 'r' ((:) 'a' ((:) 'f'
-                                                       ((:) 'f' ((:) 'i' ((:) 'c'
-                                                       ([]))))))))))))))
-                                                     (hashWith (cipherHash c0) ((:)
-                                                       b ((:) b1 [])))
-                                                     (hashDigestSize
-                                                       (cipherHash c0))))
-                                                   GHC.Base.False)));
-                                                  GHC.Base.Nothing ->
-                                                   GHC.Base.Nothing})))))))))))))
-                            (sum_merge
-                              (prod_curry
-                                (prod_curry
-                                  (prod_curry
-                                    (prod_curry
-                                      (prod_curry
-                                        (prod_curry
-                                          (prod_curry
-                                            (prod_curry
-                                              (prod_curry
-                                                (prod_curry
-                                                  (\_ c p b c0 l c1 p0 b0 o b1 _ r ->
-                                                  Prelude.Left ((,)
-                                                  (case fromSetSecret r of {
+                                                  GHC.Base.Just a ->
+                                                   case o of {
                                                     GHC.Base.Just _ -> Prelude.Right
                                                      (Prelude.Right (Prelude.Right
                                                      (Prelude.Right (Prelude.Right
@@ -1922,60 +1802,40 @@ doHandshake_derive =
                                                      (Prelude.Right (Prelude.Right
                                                      (Prelude.Right (Prelude.Right
                                                      (Prelude.Right (Prelude.Right
+                                                     (Prelude.Right (Prelude.Right
+                                                     (Prelude.Right (Prelude.Right
+                                                     (Prelude.Right (Prelude.Right
                                                      (Prelude.Left ((,) ((,) ((,)
-                                                     ((,) ((,) ((,) ((,) ((,) ((,)
-                                                     ((,) () c) p) b) c0) l) c1) p0)
-                                                     b0) o) b1))))))))))))));
+                                                     ((,) ((,) ((,) () b) c0) p0)
+                                                     b0) b1)
+                                                     (app l ((:) b1 ((:) a [])))))))))))))))))))))));
                                                     GHC.Base.Nothing ->
-                                                     Prelude.Right (Prelude.Right
-                                                     (Prelude.Right (Prelude.Right
-                                                     (Prelude.Right (Prelude.Right
-                                                     (Prelude.Right (Prelude.Right
-                                                     (Prelude.Right (Prelude.Right
-                                                     (Prelude.Right (Prelude.Right
-                                                     (Prelude.Right (Prelude.Right
-                                                     (Prelude.Right (Prelude.Right
-                                                     (Prelude.Right (Prelude.Right
-                                                     (Prelude.Right (Prelude.Right
-                                                     (Prelude.Right (Prelude.Right
-                                                     (Prelude.Right (Prelude.Right
-                                                     (Prelude.Right (Prelude.Right
-                                                     (Prelude.Right (Prelude.Right
-                                                     (Prelude.Right (Prelude.Right
-                                                     (Prelude.Right (Prelude.Right
-                                                     (Prelude.Right (Prelude.Right
-                                                     (Prelude.Right (Prelude.Right
-                                                     (inhabitant unit_inhabitant))))))))))))))))))))))))))))))))))))})
-                                                  (case fromSetSecret r of {
-                                                    GHC.Base.Just _ -> GHC.Base.Just
-                                                     (ExistT __ (SendPacket
-                                                     (I.Handshake13 ((:)
-                                                     (I.EncryptedExtensions13
-                                                     (case chooseServerName
-                                                             (chExt c1) of {
-                                                       GHC.Base.Just _ -> (:) sniExt
-                                                        [];
-                                                       GHC.Base.Nothing -> []}))
-                                                     []))));
-                                                    GHC.Base.Nothing ->
-                                                     GHC.Base.Nothing})))))))))))))
-                              (sum_merge
-                                (prod_curry
-                                  (prod_curry
-                                    (prod_curry
-                                      (prod_curry
-                                        (prod_curry
-                                          (prod_curry
-                                            (prod_curry
-                                              (prod_curry
-                                                (prod_curry
-                                                  (prod_curry
-                                                    (\_ c p b c0 l c1 p0 b0 o b1 _ r ->
-                                                    Prelude.Left ((,)
-                                                    (case fromSendPacket r of {
-                                                      GHC.Base.Just a ->
-                                                       case o of {
-                                                        GHC.Base.Just _ ->
+                                                     case extension_SignatureAlgorithms
+                                                            (chExt c1) of {
+                                                      GHC.Base.Just a0 ->
+                                                       case decideCredInfo p
+                                                              (getCertificates c) a0 of {
+                                                        GHC.Base.Just a1 ->
+                                                         case a1 of {
+                                                          (,) a2 b2 -> Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Left ((,) ((,)
+                                                           ((,) ((,) ((,) ((,) ((,)
+                                                           ((,) ((,) ((,) ((,) ((,)
+                                                           ((,) () c) p) b) c0) l)
+                                                           c1) p0) b0) o) b1) a) a2)
+                                                           b2)))))))))))))};
+                                                        GHC.Base.Nothing ->
                                                          Prelude.Right
                                                          (Prelude.Right
                                                          (Prelude.Right
@@ -1991,71 +1851,146 @@ doHandshake_derive =
                                                          (Prelude.Right
                                                          (Prelude.Right
                                                          (Prelude.Right
-                                                         (Prelude.Right
-                                                         (Prelude.Right
-                                                         (Prelude.Right
-                                                         (Prelude.Right
-                                                         (Prelude.Right
-                                                         (Prelude.Right
                                                          (Prelude.Left ((,) ((,)
-                                                         ((,) ((,) ((,) ((,) ((,) ()
-                                                         b) c0) c1) p0) b0) b1)
-                                                         (app l ((:) b1 ((:) a [])))))))))))))))))))))))));
+                                                         ((,) ((,) ((,) ((,) ((,)
+                                                         ((,) ((,) ((,) ((,) () c)
+                                                         p) b) c0) l) c1) p0) b0) o)
+                                                         b1) a))))))))))))))))};
+                                                      GHC.Base.Nothing ->
+                                                       Prelude.Right (Prelude.Right
+                                                       (Prelude.Right (Prelude.Right
+                                                       (Prelude.Right (Prelude.Right
+                                                       (Prelude.Right (Prelude.Right
+                                                       (Prelude.Right (Prelude.Right
+                                                       (Prelude.Right (Prelude.Right
+                                                       (Prelude.Right (Prelude.Right
+                                                       (Prelude.Right (Prelude.Right
+                                                       (Prelude.Right (Prelude.Left
+                                                       ((,) ((,) ((,) ((,) ((,) ((,)
+                                                       ((,) ((,) ((,) ((,) ((,) ()
+                                                       c) p) b) c0) l) c1) p0) b0)
+                                                       o) b1) a))))))))))))))))))}};
+                                                  GHC.Base.Nothing -> Prelude.Right
+                                                   (Prelude.Right (Prelude.Right
+                                                   (Prelude.Right (Prelude.Right
+                                                   (Prelude.Right (Prelude.Right
+                                                   (Prelude.Right (Prelude.Right
+                                                   (Prelude.Right (Prelude.Right
+                                                   (Prelude.Right (Prelude.Right
+                                                   (Prelude.Right (Prelude.Right
+                                                   (Prelude.Right (Prelude.Right
+                                                   (Prelude.Right (Prelude.Right
+                                                   (Prelude.Right (Prelude.Right
+                                                   (Prelude.Right (Prelude.Right
+                                                   (Prelude.Right (Prelude.Right
+                                                   (Prelude.Right (Prelude.Right
+                                                   (Prelude.Right (Prelude.Right
+                                                   (Prelude.Right (Prelude.Right
+                                                   (Prelude.Right
+                                                   (inhabitant unit_inhabitant))))))))))))))))))))))))))))))))})
+                                                (case fromSendPacket r of {
+                                                  GHC.Base.Just a ->
+                                                   case o of {
+                                                    GHC.Base.Just _ -> GHC.Base.Just
+                                                     (ExistT __ (SendPacket
+                                                     (I.Handshake13 ((:)
+                                                     (I.Finished13
+                                                     (makeVerifyData (cipherHash c0)
+                                                       (hkdfExpandLabel
+                                                         (cipherHash c0)
+                                                         (hkdfExtract
+                                                           (cipherHash c0)
+                                                           (hkdfExpandLabel
+                                                             (cipherHash c0)
+                                                             (hkdfExtract
+                                                               (cipherHash c0)
+                                                               (b_replicate
+                                                                 (hashDigestSize
+                                                                   (cipherHash c0))
+                                                                 w0) b0)
+                                                             (s2b ((:) 'd' ((:) 'e'
+                                                               ((:) 'r' ((:) 'i'
+                                                               ((:) 'v' ((:) 'e'
+                                                               ((:) 'd' ([])))))))))
+                                                             (hashWith
+                                                               (cipherHash c0) ((:)
+                                                               (s2b ([])) []))
+                                                             (hashDigestSize
+                                                               (cipherHash c0)))
+                                                           (ba_convert (snd p0)))
+                                                         (s2b ((:) 's' ((:) ' ' ((:)
+                                                           'h' ((:) 's' ((:) ' '
+                                                           ((:) 't' ((:) 'r' ((:)
+                                                           'a' ((:) 'f' ((:) 'f'
+                                                           ((:) 'i' ((:) 'c'
+                                                           ([]))))))))))))))
+                                                         (hashWith (cipherHash c0)
+                                                           ((:) b ((:) b1 [])))
+                                                         (hashDigestSize
+                                                           (cipherHash c0)))
+                                                       (hashWith (cipherHash c0)
+                                                         (app l ((:) b1 ((:) a []))))))
+                                                     []))));
+                                                    GHC.Base.Nothing ->
+                                                     case extension_SignatureAlgorithms
+                                                            (chExt c1) of {
+                                                      GHC.Base.Just a0 ->
+                                                       case decideCredInfo p
+                                                              (getCertificates c) a0 of {
+                                                        GHC.Base.Just _ ->
+                                                         GHC.Base.Just (ExistT __
+                                                         (SendPacket (I.Handshake13
+                                                         ((:) (I.Certificate13 empty
+                                                         c ((:) [] [])) []))));
                                                         GHC.Base.Nothing ->
-                                                         case extension_SignatureAlgorithms
-                                                                (chExt c1) of {
-                                                          GHC.Base.Just a0 ->
-                                                           case decideCredInfo p
-                                                                  (getCertificates
-                                                                    c) a0 of {
-                                                            GHC.Base.Just a1 ->
-                                                             case a1 of {
-                                                              (,) a2 b2 ->
-                                                               Prelude.Right
-                                                               (Prelude.Right
-                                                               (Prelude.Right
-                                                               (Prelude.Right
-                                                               (Prelude.Right
-                                                               (Prelude.Right
-                                                               (Prelude.Right
-                                                               (Prelude.Right
-                                                               (Prelude.Right
-                                                               (Prelude.Right
-                                                               (Prelude.Right
-                                                               (Prelude.Right
-                                                               (Prelude.Right
-                                                               (Prelude.Right
-                                                               (Prelude.Left ((,)
-                                                               ((,) ((,) ((,) ((,)
-                                                               ((,) ((,) ((,) ((,)
-                                                               ((,) ((,) ((,) ((,)
-                                                               () c) p) b) c0) l)
-                                                               c1) p0) b0) o) b1) a)
-                                                               a2) b2)))))))))))))))};
-                                                            GHC.Base.Nothing ->
-                                                             Prelude.Right
-                                                             (Prelude.Right
-                                                             (Prelude.Right
-                                                             (Prelude.Right
-                                                             (Prelude.Right
-                                                             (Prelude.Right
-                                                             (Prelude.Right
-                                                             (Prelude.Right
-                                                             (Prelude.Right
-                                                             (Prelude.Right
-                                                             (Prelude.Right
-                                                             (Prelude.Right
-                                                             (Prelude.Right
-                                                             (Prelude.Right
-                                                             (Prelude.Right
-                                                             (Prelude.Right
-                                                             (Prelude.Right
-                                                             (Prelude.Left ((,) ((,)
-                                                             ((,) ((,) ((,) ((,)
-                                                             ((,) ((,) ((,) ((,)
-                                                             ((,) () c) p) b) c0) l)
-                                                             c1) p0) b0) o) b1)
-                                                             a))))))))))))))))))};
+                                                         GHC.Base.Just (ExistT __
+                                                         (SendPacket (I.Alert13 ((:)
+                                                         ((,) I.AlertLevel_Fatal
+                                                         I.HandshakeFailure) []))))};
+                                                      GHC.Base.Nothing ->
+                                                       GHC.Base.Just (ExistT __
+                                                       (SendPacket (I.Alert13 ((:)
+                                                       ((,) I.AlertLevel_Fatal
+                                                       I.MissingExtension) []))))}};
+                                                  GHC.Base.Nothing ->
+                                                   GHC.Base.Nothing})))))))))))))
+                            (sum_merge
+                              (prod_curry
+                                (prod_curry
+                                  (prod_curry
+                                    (prod_curry
+                                      (prod_curry
+                                        (prod_curry
+                                          (prod_curry
+                                            (prod_curry
+                                              (prod_curry
+                                                (prod_curry
+                                                  (prod_curry
+                                                    (prod_curry
+                                                      (prod_curry
+                                                        (\_ c p b c0 l c1 p0 b0 o b1 b2 p1 h _ r ->
+                                                        Prelude.Left ((,)
+                                                        (case fromSendPacket r of {
+                                                          GHC.Base.Just a ->
+                                                           Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Left ((,) ((,)
+                                                           ((,) ((,) ((,) ((,) ((,)
+                                                           ((,) ((,) ((,) ((,) ((,)
+                                                           ((,) ((,) () c) p) b) c0)
+                                                           l) c1) p0) b0) o) b1) b2)
+                                                           p1) h) a))))))))))))));
                                                           GHC.Base.Nothing ->
                                                            Prelude.Right
                                                            (Prelude.Right
@@ -2076,110 +2011,117 @@ doHandshake_derive =
                                                            (Prelude.Right
                                                            (Prelude.Right
                                                            (Prelude.Right
-                                                           (Prelude.Left ((,) ((,)
-                                                           ((,) ((,) ((,) ((,) ((,)
-                                                           ((,) ((,) ((,) ((,) () c)
-                                                           p) b) c0) l) c1) p0) b0)
-                                                           o) b1)
-                                                           a))))))))))))))))))))}};
-                                                      GHC.Base.Nothing ->
-                                                       Prelude.Right (Prelude.Right
-                                                       (Prelude.Right (Prelude.Right
-                                                       (Prelude.Right (Prelude.Right
-                                                       (Prelude.Right (Prelude.Right
-                                                       (Prelude.Right (Prelude.Right
-                                                       (Prelude.Right (Prelude.Right
-                                                       (Prelude.Right (Prelude.Right
-                                                       (Prelude.Right (Prelude.Right
-                                                       (Prelude.Right (Prelude.Right
-                                                       (Prelude.Right (Prelude.Right
-                                                       (Prelude.Right (Prelude.Right
-                                                       (Prelude.Right (Prelude.Right
-                                                       (Prelude.Right (Prelude.Right
-                                                       (Prelude.Right (Prelude.Right
-                                                       (Prelude.Right (Prelude.Right
-                                                       (Prelude.Right (Prelude.Right
-                                                       (Prelude.Right (Prelude.Right
-                                                       (Prelude.Right (Prelude.Right
-                                                       (inhabitant unit_inhabitant))))))))))))))))))))))))))))))))))))})
-                                                    (case fromSendPacket r of {
-                                                      GHC.Base.Just a ->
-                                                       case o of {
-                                                        GHC.Base.Just _ ->
-                                                         GHC.Base.Just (ExistT __
-                                                         (SendPacket (I.Handshake13
-                                                         ((:) (I.Finished13
-                                                         (makeVerifyData
-                                                           (cipherHash c0)
-                                                           (hkdfExpandLabel
-                                                             (cipherHash c0)
-                                                             (hkdfExtract
-                                                               (cipherHash c0)
-                                                               (hkdfExpandLabel
-                                                                 (cipherHash c0)
-                                                                 (hkdfExtract
-                                                                   (cipherHash c0)
-                                                                   (b_replicate
-                                                                     (hashDigestSize
-                                                                       (cipherHash
-                                                                         c0)) w0)
-                                                                   b0)
-                                                                 (s2b ((:) 'd' ((:)
-                                                                   'e' ((:) 'r' ((:)
-                                                                   'i' ((:) 'v' ((:)
-                                                                   'e' ((:) 'd'
-                                                                   ([])))))))))
-                                                                 (hashWith
-                                                                   (cipherHash c0)
-                                                                   ((:) (s2b ([]))
-                                                                   []))
-                                                                 (hashDigestSize
-                                                                   (cipherHash c0)))
-                                                               (ba_convert (snd p0)))
-                                                             (s2b ((:) 's' ((:) ' '
-                                                               ((:) 'h' ((:) 's'
-                                                               ((:) ' ' ((:) 't'
-                                                               ((:) 'r' ((:) 'a'
-                                                               ((:) 'f' ((:) 'f'
-                                                               ((:) 'i' ((:) 'c'
-                                                               ([]))))))))))))))
-                                                             (hashWith
-                                                               (cipherHash c0) ((:)
-                                                               b ((:) b1 [])))
-                                                             (hashDigestSize
-                                                               (cipherHash c0)))
-                                                           (hashWith (cipherHash c0)
-                                                             (app l ((:) b1 ((:) a
-                                                               [])))))) []))));
-                                                        GHC.Base.Nothing ->
-                                                         case extension_SignatureAlgorithms
-                                                                (chExt c1) of {
-                                                          GHC.Base.Just a0 ->
-                                                           case decideCredInfo p
-                                                                  (getCertificates
-                                                                    c) a0 of {
-                                                            GHC.Base.Just _ ->
-                                                             GHC.Base.Just (ExistT
-                                                             __ (SendPacket
-                                                             (I.Handshake13 ((:)
-                                                             (I.Certificate13 empty
-                                                             c ((:) [] [])) []))));
-                                                            GHC.Base.Nothing ->
-                                                             GHC.Base.Just (ExistT
-                                                             __ (SendPacket
-                                                             (I.Alert13 ((:) ((,)
-                                                             I.AlertLevel_Fatal
-                                                             I.HandshakeFailure)
-                                                             []))))};
-                                                          GHC.Base.Nothing ->
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           ())))))))))))))))))))))))))))))))})
+                                                        (case fromSendPacket r of {
+                                                          GHC.Base.Just a ->
                                                            GHC.Base.Just (ExistT __
-                                                           (SendPacket (I.Alert13
-                                                           ((:) ((,)
-                                                           I.AlertLevel_Fatal
-                                                           I.MissingExtension)
-                                                           []))))}};
-                                                      GHC.Base.Nothing ->
-                                                       GHC.Base.Nothing})))))))))))))
+                                                           (MakeCertVerify ((,) ((,)
+                                                           ((,) p1 p) h)
+                                                           (hashWith (cipherHash c0)
+                                                             (app
+                                                               (app l ((:) b1 ((:)
+                                                                 b2 []))) ((:) a
+                                                               []))))));
+                                                          GHC.Base.Nothing ->
+                                                           GHC.Base.Nothing}))))))))))))))))
+                              (sum_merge
+                                (prod_curry
+                                  (prod_curry
+                                    (prod_curry
+                                      (prod_curry
+                                        (prod_curry
+                                          (prod_curry
+                                            (prod_curry
+                                              (prod_curry
+                                                (prod_curry
+                                                  (prod_curry
+                                                    (prod_curry
+                                                      (prod_curry
+                                                        (prod_curry
+                                                          (prod_curry
+                                                            (\_ c p b c0 l c1 p0 b0 o b1 b2 _ _ b3 _ r ->
+                                                            Prelude.Left ((,)
+                                                            (case fromMakeCertVerify
+                                                                    r of {
+                                                              GHC.Base.Just a ->
+                                                               Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Left ((,)
+                                                               ((,) ((,) ((,) ((,)
+                                                               ((,) ((,) ((,) ((,)
+                                                               ((,) ((,) ((,) ((,)
+                                                               () c) p) b) c0) l)
+                                                               c1) p0) b0) o) b1)
+                                                               b2) b3)
+                                                               a)))))))))))))));
+                                                              GHC.Base.Nothing ->
+                                                               Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               ())))))))))))))))))))))))))))))))})
+                                                            (case fromMakeCertVerify
+                                                                    r of {
+                                                              GHC.Base.Just a ->
+                                                               GHC.Base.Just (ExistT
+                                                               __ (SendPacket
+                                                               (I.Handshake13 ((:) a
+                                                               []))));
+                                                              GHC.Base.Nothing ->
+                                                               GHC.Base.Nothing})))))))))))))))))
                                 (sum_merge
                                   (prod_curry
                                     (prod_curry
@@ -2194,7 +2136,7 @@ doHandshake_derive =
                                                       (prod_curry
                                                         (prod_curry
                                                           (prod_curry
-                                                            (\_ c p b c0 l c1 p0 b0 o b1 b2 p1 h _ r ->
+                                                            (\_ _ _ b c l _ p b0 _ b1 b2 b3 _ _ r ->
                                                             Prelude.Left ((,)
                                                             (case fromSendPacket r of {
                                                               GHC.Base.Just a ->
@@ -2213,14 +2155,18 @@ doHandshake_derive =
                                                                (Prelude.Right
                                                                (Prelude.Right
                                                                (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
                                                                (Prelude.Left ((,)
                                                                ((,) ((,) ((,) ((,)
-                                                               ((,) ((,) ((,) ((,)
-                                                               ((,) ((,) ((,) ((,)
-                                                               ((,) () c) p) b) c0)
-                                                               l) c1) p0) b0) o) b1)
-                                                               b2) p1) h)
-                                                               a))))))))))))))));
+                                                               ((,) () b) c) p) b0)
+                                                               b1)
+                                                               (app
+                                                                 (app l ((:) b1 ((:)
+                                                                   b2 []))) ((:) b3
+                                                                 ((:) a [])))))))))))))))))))))));
                                                               GHC.Base.Nothing ->
                                                                Prelude.Right
                                                                (Prelude.Right
@@ -2254,23 +2200,71 @@ doHandshake_derive =
                                                                (Prelude.Right
                                                                (Prelude.Right
                                                                (Prelude.Right
-                                                               (Prelude.Right
-                                                               (Prelude.Right
-                                                               (Prelude.Right
-                                                               (Prelude.Right
-                                                               ())))))))))))))))))))))))))))))))))))})
+                                                               ())))))))))))))))))))))))))))))))})
                                                             (case fromSendPacket r of {
                                                               GHC.Base.Just a ->
                                                                GHC.Base.Just (ExistT
-                                                               __ (MakeCertVerify
-                                                               ((,) ((,) ((,) p1 p)
-                                                               h)
-                                                               (hashWith
-                                                                 (cipherHash c0)
-                                                                 (app
-                                                                   (app l ((:) b1
-                                                                     ((:) b2 [])))
-                                                                   ((:) a []))))));
+                                                               __ (SendPacket
+                                                               (I.Handshake13 ((:)
+                                                               (I.Finished13
+                                                               (makeVerifyData
+                                                                 (cipherHash c)
+                                                                 (hkdfExpandLabel
+                                                                   (cipherHash c)
+                                                                   (hkdfExtract
+                                                                     (cipherHash c)
+                                                                     (hkdfExpandLabel
+                                                                       (cipherHash
+                                                                         c)
+                                                                       (hkdfExtract
+                                                                         (cipherHash
+                                                                           c)
+                                                                         (b_replicate
+                                                                           (hashDigestSize
+                                                                           (cipherHash
+                                                                           c)) w0)
+                                                                         b0)
+                                                                       (s2b ((:) 'd'
+                                                                         ((:) 'e'
+                                                                         ((:) 'r'
+                                                                         ((:) 'i'
+                                                                         ((:) 'v'
+                                                                         ((:) 'e'
+                                                                         ((:) 'd'
+                                                                         ([])))))))))
+                                                                       (hashWith
+                                                                         (cipherHash
+                                                                           c) ((:)
+                                                                         (s2b ([]))
+                                                                         []))
+                                                                       (hashDigestSize
+                                                                         (cipherHash
+                                                                           c)))
+                                                                     (ba_convert
+                                                                       (snd p)))
+                                                                   (s2b ((:) 's'
+                                                                     ((:) ' ' ((:)
+                                                                     'h' ((:) 's'
+                                                                     ((:) ' ' ((:)
+                                                                     't' ((:) 'r'
+                                                                     ((:) 'a' ((:)
+                                                                     'f' ((:) 'f'
+                                                                     ((:) 'i' ((:)
+                                                                     'c'
+                                                                     ([]))))))))))))))
+                                                                   (hashWith
+                                                                     (cipherHash c)
+                                                                     ((:) b ((:) b1
+                                                                     [])))
+                                                                   (hashDigestSize
+                                                                     (cipherHash c)))
+                                                                 (hashWith
+                                                                   (cipherHash c)
+                                                                   (app
+                                                                     (app l ((:) b1
+                                                                       ((:) b2 [])))
+                                                                     ((:) b3 ((:) a
+                                                                     [])))))) []))));
                                                               GHC.Base.Nothing ->
                                                                GHC.Base.Nothing}))))))))))))))))
                                   (sum_merge
@@ -2285,88 +2279,72 @@ doHandshake_derive =
                                                     (prod_curry
                                                       (prod_curry
                                                         (prod_curry
-                                                          (prod_curry
-                                                            (prod_curry
-                                                              (prod_curry
-                                                                (\_ c p b c0 l c1 p0 b0 o b1 b2 _ _ b3 _ r ->
-                                                                Prelude.Left ((,)
-                                                                (case fromMakeCertVerify
-                                                                        r of {
-                                                                  GHC.Base.Just a ->
-                                                                   Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Left
-                                                                   ((,) ((,) ((,)
-                                                                   ((,) ((,) ((,)
-                                                                   ((,) ((,) ((,)
-                                                                   ((,) ((,) ((,)
-                                                                   ((,) () c) p) b)
-                                                                   c0) l) c1) p0)
-                                                                   b0) o) b1) b2)
-                                                                   b3)
-                                                                   a)))))))))))))))));
-                                                                  GHC.Base.Nothing ->
-                                                                   Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   ())))))))))))))))))))))))))))))))))))})
-                                                                (case fromMakeCertVerify
-                                                                        r of {
-                                                                  GHC.Base.Just a ->
-                                                                   GHC.Base.Just
-                                                                   (ExistT __
-                                                                   (SendPacket
-                                                                   (I.Handshake13
-                                                                   ((:) a []))));
-                                                                  GHC.Base.Nothing ->
-                                                                   GHC.Base.Nothing})))))))))))))))))
+                                                          (\_ c p b c0 l c1 p0 b0 o b1 b2 _ r ->
+                                                          Prelude.Left ((,)
+                                                          (case fromSendPacket r of {
+                                                            GHC.Base.Just _ ->
+                                                             Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Left ((,) ((,)
+                                                             ((,) ((,) ((,) ((,)
+                                                             ((,) ((,) ((,) ((,)
+                                                             ((,) () c) p) b) c0) l)
+                                                             c1) p0) b0) o) b1)
+                                                             b2)))))))))))))))));
+                                                            GHC.Base.Nothing ->
+                                                             Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             ())))))))))))))))))))))))))))))))})
+                                                          (case fromSendPacket r of {
+                                                            GHC.Base.Just _ ->
+                                                             GHC.Base.Just (ExistT
+                                                             __ (Close ()));
+                                                            GHC.Base.Nothing ->
+                                                             GHC.Base.Nothing}))))))))))))))
                                     (sum_merge
                                       (prod_curry
                                         (prod_curry
@@ -2379,164 +2357,42 @@ doHandshake_derive =
                                                       (prod_curry
                                                         (prod_curry
                                                           (prod_curry
-                                                            (prod_curry
-                                                              (prod_curry
-                                                                (\_ _ _ b c l c0 p b0 _ b1 b2 b3 _ _ r ->
-                                                                Prelude.Left ((,)
-                                                                (case fromSendPacket
-                                                                        r of {
-                                                                  GHC.Base.Just a ->
-                                                                   Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Left
-                                                                   ((,) ((,) ((,)
-                                                                   ((,) ((,) ((,)
-                                                                   ((,) () b) c) c0)
-                                                                   p) b0) b1)
-                                                                   (app
-                                                                     (app l ((:) b1
-                                                                       ((:) b2 [])))
-                                                                     ((:) b3 ((:) a
-                                                                     [])))))))))))))))))))))))));
-                                                                  GHC.Base.Nothing ->
-                                                                   Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   (Prelude.Right
-                                                                   ())))))))))))))))))))))))))))))))))))})
-                                                                (case fromSendPacket
-                                                                        r of {
-                                                                  GHC.Base.Just a ->
-                                                                   GHC.Base.Just
-                                                                   (ExistT __
-                                                                   (SendPacket
-                                                                   (I.Handshake13
-                                                                   ((:)
-                                                                   (I.Finished13
-                                                                   (makeVerifyData
-                                                                     (cipherHash c)
-                                                                     (hkdfExpandLabel
-                                                                       (cipherHash
-                                                                         c)
-                                                                       (hkdfExtract
-                                                                         (cipherHash
-                                                                           c)
-                                                                         (hkdfExpandLabel
-                                                                           (cipherHash
-                                                                           c)
-                                                                           (hkdfExtract
-                                                                           (cipherHash
-                                                                           c)
-                                                                           (b_replicate
-                                                                           (hashDigestSize
-                                                                           (cipherHash
-                                                                           c)) w0)
-                                                                           b0)
-                                                                           (s2b ((:)
-                                                                           'd' ((:)
-                                                                           'e' ((:)
-                                                                           'r' ((:)
-                                                                           'i' ((:)
-                                                                           'v' ((:)
-                                                                           'e' ((:)
-                                                                           'd'
-                                                                           ([])))))))))
-                                                                           (hashWith
-                                                                           (cipherHash
-                                                                           c) ((:)
-                                                                           (s2b
-                                                                           ([]))
-                                                                           []))
-                                                                           (hashDigestSize
-                                                                           (cipherHash
-                                                                           c)))
-                                                                         (ba_convert
-                                                                           (snd p)))
-                                                                       (s2b ((:) 's'
-                                                                         ((:) ' '
-                                                                         ((:) 'h'
-                                                                         ((:) 's'
-                                                                         ((:) ' '
-                                                                         ((:) 't'
-                                                                         ((:) 'r'
-                                                                         ((:) 'a'
-                                                                         ((:) 'f'
-                                                                         ((:) 'f'
-                                                                         ((:) 'i'
-                                                                         ((:) 'c'
-                                                                         ([]))))))))))))))
-                                                                       (hashWith
-                                                                         (cipherHash
-                                                                           c) ((:) b
-                                                                         ((:) b1
-                                                                         [])))
-                                                                       (hashDigestSize
-                                                                         (cipherHash
-                                                                           c)))
-                                                                     (hashWith
-                                                                       (cipherHash
-                                                                         c)
-                                                                       (app
-                                                                         (app l ((:)
-                                                                           b1 ((:)
-                                                                           b2 [])))
-                                                                         ((:) b3
-                                                                         ((:) a
-                                                                         []))))))
-                                                                   []))));
-                                                                  GHC.Base.Nothing ->
-                                                                   GHC.Base.Nothing}))))))))))))))))
+                                                            (\_ _ _ _ _ _ _ _ _ _ _ _ _ _ ->
+                                                            Prelude.Left ((,)
+                                                            (Prelude.Right
+                                                            (Prelude.Right
+                                                            (Prelude.Right
+                                                            (Prelude.Right
+                                                            (Prelude.Right
+                                                            (Prelude.Right
+                                                            (Prelude.Right
+                                                            (Prelude.Right
+                                                            (Prelude.Right
+                                                            (Prelude.Right
+                                                            (Prelude.Right
+                                                            (Prelude.Right
+                                                            (Prelude.Right
+                                                            (Prelude.Right
+                                                            (Prelude.Right
+                                                            (Prelude.Right
+                                                            (Prelude.Right
+                                                            (Prelude.Right
+                                                            (Prelude.Right
+                                                            (Prelude.Right
+                                                            (Prelude.Right
+                                                            (Prelude.Right
+                                                            (Prelude.Right
+                                                            (Prelude.Right
+                                                            (Prelude.Right
+                                                            (Prelude.Right
+                                                            (Prelude.Right
+                                                            (Prelude.Right
+                                                            (Prelude.Right
+                                                            (Prelude.Right
+                                                            (Prelude.Right
+                                                            (Prelude.Right
+                                                            ()))))))))))))))))))))))))))))))))
+                                                            GHC.Base.Nothing)))))))))))))
                                       (sum_merge
                                         (prod_curry
                                           (prod_curry
@@ -2611,11 +2467,7 @@ doHandshake_derive =
                                                                  (Prelude.Right
                                                                  (Prelude.Right
                                                                  (Prelude.Right
-                                                                 (Prelude.Right
-                                                                 (Prelude.Right
-                                                                 (Prelude.Right
-                                                                 (Prelude.Right
-                                                                 ())))))))))))))))))))))))))))))))))))})
+                                                                 ())))))))))))))))))))))))))))))))})
                                                               (case fromSendPacket r of {
                                                                 GHC.Base.Just _ ->
                                                                  GHC.Base.Just
@@ -2669,11 +2521,7 @@ doHandshake_derive =
                                                                 (Prelude.Right
                                                                 (Prelude.Right
                                                                 (Prelude.Right
-                                                                (Prelude.Right
-                                                                (Prelude.Right
-                                                                (Prelude.Right
-                                                                (Prelude.Right
-                                                                ()))))))))))))))))))))))))))))))))))))
+                                                                ()))))))))))))))))))))))))))))))))
                                                                 GHC.Base.Nothing)))))))))))))
                                           (sum_merge
                                             (prod_curry
@@ -2682,17 +2530,303 @@ doHandshake_derive =
                                                   (prod_curry
                                                     (prod_curry
                                                       (prod_curry
+                                                        (\_ b c p b0 b1 l _ r ->
+                                                        Prelude.Left ((,)
+                                                        (case fromSendPacket r of {
+                                                          GHC.Base.Just a ->
+                                                           Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Left ((,) ((,)
+                                                           ((,) ((,) ((,) ((,) ((,)
+                                                           () b) c) p) b0) b1) l)
+                                                           a)))))))))))))))))))));
+                                                          GHC.Base.Nothing ->
+                                                           Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (Prelude.Right
+                                                           (inhabitant
+                                                             unit_inhabitant))))))))))))))))))))))))))))))))})
+                                                        (case fromSendPacket r of {
+                                                          GHC.Base.Just _ ->
+                                                           GHC.Base.Just (ExistT __
+                                                           (GetCurrentTime ()));
+                                                          GHC.Base.Nothing ->
+                                                           GHC.Base.Nothing})))))))))
+                                            (sum_merge
+                                              (prod_curry
+                                                (prod_curry
+                                                  (prod_curry
+                                                    (prod_curry
+                                                      (prod_curry
+                                                        (prod_curry
+                                                          (prod_curry
+                                                            (\_ b c p b0 b1 l b2 _ r ->
+                                                            Prelude.Left ((,)
+                                                            (case fromGetCurrentTime
+                                                                    r of {
+                                                              GHC.Base.Just _ ->
+                                                               Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Left ((,)
+                                                               ((,) ((,) ((,) ((,)
+                                                               ((,) ((,) () b) c) p)
+                                                               b0) b1) l)
+                                                               b2))))))))))))))))))))));
+                                                              GHC.Base.Nothing ->
+                                                               Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (inhabitant
+                                                                 unit_inhabitant))))))))))))))))))))))))))))))))})
+                                                            (case fromGetCurrentTime
+                                                                    r of {
+                                                              GHC.Base.Just _ ->
+                                                               GHC.Base.Just (ExistT
+                                                               __ (SetSecret ((,)
+                                                               ((,) ((,)
+                                                               (cipherHash c) c)
+                                                               (hkdfExpandLabel
+                                                                 (cipherHash c)
+                                                                 (hkdfExtract
+                                                                   (cipherHash c)
+                                                                   (hkdfExpandLabel
+                                                                     (cipherHash c)
+                                                                     (hkdfExtract
+                                                                       (cipherHash
+                                                                         c)
+                                                                       (b_replicate
+                                                                         (hashDigestSize
+                                                                           (cipherHash
+                                                                           c)) w0)
+                                                                       b0)
+                                                                     (s2b ((:) 'd'
+                                                                       ((:) 'e' ((:)
+                                                                       'r' ((:) 'i'
+                                                                       ((:) 'v' ((:)
+                                                                       'e' ((:) 'd'
+                                                                       ([])))))))))
+                                                                     (hashWith
+                                                                       (cipherHash
+                                                                         c) ((:)
+                                                                       (s2b ([]))
+                                                                       []))
+                                                                     (hashDigestSize
+                                                                       (cipherHash
+                                                                         c)))
+                                                                   (ba_convert
+                                                                     (snd p)))
+                                                                 (s2b ((:) 'c' ((:)
+                                                                   ' ' ((:) 'h' ((:)
+                                                                   's' ((:) ' ' ((:)
+                                                                   't' ((:) 'r' ((:)
+                                                                   'a' ((:) 'f' ((:)
+                                                                   'f' ((:) 'i' ((:)
+                                                                   'c'
+                                                                   ([]))))))))))))))
+                                                                 (hashWith
+                                                                   (cipherHash c)
+                                                                   ((:) b ((:) b1
+                                                                   [])))
+                                                                 (hashDigestSize
+                                                                   (cipherHash c))))
+                                                               GHC.Base.True)));
+                                                              GHC.Base.Nothing ->
+                                                               GHC.Base.Nothing}))))))))))
+                                              (sum_merge
+                                                (prod_curry
+                                                  (prod_curry
+                                                    (prod_curry
+                                                      (prod_curry
+                                                        (prod_curry
+                                                          (prod_curry
+                                                            (prod_curry
+                                                              (\_ b c p b0 b1 l b2 _ _ ->
+                                                              Prelude.Left ((,)
+                                                              (Prelude.Right
+                                                              (Prelude.Right
+                                                              (Prelude.Right
+                                                              (Prelude.Right
+                                                              (Prelude.Right
+                                                              (Prelude.Right
+                                                              (Prelude.Right
+                                                              (Prelude.Right
+                                                              (Prelude.Right
+                                                              (Prelude.Right
+                                                              (Prelude.Right
+                                                              (Prelude.Right
+                                                              (Prelude.Right
+                                                              (Prelude.Right
+                                                              (Prelude.Right
+                                                              (Prelude.Right
+                                                              (Prelude.Right
+                                                              (Prelude.Right
+                                                              (Prelude.Right
+                                                              (Prelude.Right
+                                                              (Prelude.Right
+                                                              (Prelude.Right
+                                                              (Prelude.Left ((,)
+                                                              ((,) ((,) ((,) ((,)
+                                                              ((,) ((,) () b) c) p)
+                                                              b0) b1) l)
+                                                              b2))))))))))))))))))))))))
+                                                              (GHC.Base.Just (ExistT
+                                                              __ (RecvPacket
+                                                              (Prelude.Left
+                                                              (Prelude.Left
+                                                              (Prelude.Right
+                                                              ())))))))))))))))
+                                                (sum_merge
+                                                  (prod_curry
+                                                    (prod_curry
+                                                      (prod_curry
                                                         (prod_curry
                                                           (prod_curry
                                                             (prod_curry
                                                               (prod_curry
-                                                                (prod_curry
-                                                                  (\_ c p b c0 l c1 p0 b0 o b1 b2 _ r ->
-                                                                  Prelude.Left ((,)
-                                                                  (case fromSendPacket
-                                                                          r of {
-                                                                    GHC.Base.Just _ ->
+                                                                (\_ b c p b0 b1 l b2 _ r ->
+                                                                Prelude.Left ((,)
+                                                                (case fromRecvFinished
+                                                                        r of {
+                                                                  GHC.Base.Just a ->
+                                                                   Prelude.Right
+                                                                   (Prelude.Right
+                                                                   (Prelude.Right
+                                                                   (Prelude.Right
+                                                                   (Prelude.Right
+                                                                   (Prelude.Right
+                                                                   (Prelude.Right
+                                                                   (Prelude.Right
+                                                                   (Prelude.Right
+                                                                   (Prelude.Right
+                                                                   (Prelude.Right
+                                                                   (Prelude.Right
+                                                                   (Prelude.Right
+                                                                   (Prelude.Right
+                                                                   (Prelude.Right
+                                                                   (Prelude.Right
+                                                                   (Prelude.Right
+                                                                   (Prelude.Right
+                                                                   (Prelude.Right
+                                                                   (Prelude.Right
+                                                                   (Prelude.Right
+                                                                   (Prelude.Right
+                                                                   (Prelude.Right
+                                                                   (Prelude.Left
+                                                                   ((,) ((,) ((,)
+                                                                   ((,) ((,) ((,)
+                                                                   ((,) ((,) () b)
+                                                                   c) p) b0) b1) l)
+                                                                   b2)
+                                                                   a))))))))))))))))))))))));
+                                                                  GHC.Base.Nothing ->
+                                                                   case retAlert r of {
+                                                                    GHC.Base.Just a ->
                                                                      Prelude.Right
+                                                                     (Prelude.Right
+                                                                     (Prelude.Right
+                                                                     (Prelude.Right
+                                                                     (Prelude.Right
+                                                                     (Prelude.Right
+                                                                     (Prelude.Right
+                                                                     (Prelude.Right
+                                                                     (Prelude.Right
+                                                                     (Prelude.Right
+                                                                     (Prelude.Right
                                                                      (Prelude.Right
                                                                      (Prelude.Right
                                                                      (Prelude.Right
@@ -2713,14 +2847,8 @@ doHandshake_derive =
                                                                      (Prelude.Right
                                                                      (Prelude.Right
                                                                      (Prelude.Left
-                                                                     ((,) ((,) ((,)
-                                                                     ((,) ((,) ((,)
-                                                                     ((,) ((,) ((,)
-                                                                     ((,) ((,) () c)
-                                                                     p) b) c0) l)
-                                                                     c1) p0) b0) o)
-                                                                     b1)
-                                                                     b2)))))))))))))))))))));
+                                                                     ((,) ()
+                                                                     a)))))))))))))))))))))))))))))));
                                                                     GHC.Base.Nothing ->
                                                                      Prelude.Right
                                                                      (Prelude.Right
@@ -2754,23 +2882,26 @@ doHandshake_derive =
                                                                      (Prelude.Right
                                                                      (Prelude.Right
                                                                      (Prelude.Right
-                                                                     (Prelude.Right
-                                                                     (Prelude.Right
-                                                                     (Prelude.Right
-                                                                     (Prelude.Right
-                                                                     ())))))))))))))))))))))))))))))))))))})
-                                                                  (case fromSendPacket
-                                                                          r of {
-                                                                    GHC.Base.Just _ ->
+                                                                     (inhabitant
+                                                                       unit_inhabitant))))))))))))))))))))))))))))))))}})
+                                                                (case fromRecvFinished
+                                                                        r of {
+                                                                  GHC.Base.Just _ ->
+                                                                   GHC.Base.Just
+                                                                   (ExistT __
+                                                                   (GetCurrentTime
+                                                                   ()));
+                                                                  GHC.Base.Nothing ->
+                                                                   case retAlert r of {
+                                                                    GHC.Base.Just a ->
                                                                      GHC.Base.Just
                                                                      (ExistT __
-                                                                     (Close ()));
+                                                                     (SendPacket
+                                                                     (I.Alert13 ((:)
+                                                                     a []))));
                                                                     GHC.Base.Nothing ->
-                                                                     GHC.Base.Nothing}))))))))))))))
-                                            (sum_merge
-                                              (prod_curry
-                                                (prod_curry
-                                                  (prod_curry
+                                                                     GHC.Base.Nothing}}))))))))))
+                                                  (sum_merge
                                                     (prod_curry
                                                       (prod_curry
                                                         (prod_curry
@@ -2779,7 +2910,828 @@ doHandshake_derive =
                                                               (prod_curry
                                                                 (prod_curry
                                                                   (prod_curry
-                                                                    (\_ _ _ _ _ _ _ _ _ _ _ _ _ _ ->
+                                                                    (\_ b c p b0 b1 l b2 b3 _ r ->
+                                                                    Prelude.Left
+                                                                    ((,)
+                                                                    (case fromGetCurrentTime
+                                                                           r of {
+                                                                      GHC.Base.Just _ ->
+                                                                       Prelude.Right
+                                                                       (Prelude.Right
+                                                                       (Prelude.Right
+                                                                       (Prelude.Right
+                                                                       (Prelude.Right
+                                                                       (Prelude.Right
+                                                                       (Prelude.Right
+                                                                       (Prelude.Right
+                                                                       (Prelude.Right
+                                                                       (Prelude.Right
+                                                                       (Prelude.Right
+                                                                       (Prelude.Right
+                                                                       (Prelude.Right
+                                                                       (Prelude.Right
+                                                                       (Prelude.Right
+                                                                       (Prelude.Right
+                                                                       (Prelude.Right
+                                                                       (Prelude.Right
+                                                                       (Prelude.Right
+                                                                       (Prelude.Right
+                                                                       (Prelude.Right
+                                                                       (Prelude.Right
+                                                                       (Prelude.Right
+                                                                       (Prelude.Right
+                                                                       (Prelude.Left
+                                                                       ((,) ((,)
+                                                                       ((,) ((,)
+                                                                       ((,) ((,)
+                                                                       ((,) ((,) ()
+                                                                       b) c) p) b0)
+                                                                       b1) l) b2)
+                                                                       b3)))))))))))))))))))))))));
+                                                                      GHC.Base.Nothing ->
+                                                                       Prelude.Right
+                                                                       (Prelude.Right
+                                                                       (Prelude.Right
+                                                                       (Prelude.Right
+                                                                       (Prelude.Right
+                                                                       (Prelude.Right
+                                                                       (Prelude.Right
+                                                                       (Prelude.Right
+                                                                       (Prelude.Right
+                                                                       (Prelude.Right
+                                                                       (Prelude.Right
+                                                                       (Prelude.Right
+                                                                       (Prelude.Right
+                                                                       (Prelude.Right
+                                                                       (Prelude.Right
+                                                                       (Prelude.Right
+                                                                       (Prelude.Right
+                                                                       (Prelude.Right
+                                                                       (Prelude.Right
+                                                                       (Prelude.Right
+                                                                       (Prelude.Right
+                                                                       (Prelude.Right
+                                                                       (Prelude.Right
+                                                                       (Prelude.Right
+                                                                       (Prelude.Right
+                                                                       (Prelude.Right
+                                                                       (Prelude.Right
+                                                                       (Prelude.Right
+                                                                       (Prelude.Right
+                                                                       (Prelude.Right
+                                                                       (Prelude.Right
+                                                                       (Prelude.Right
+                                                                       (inhabitant
+                                                                         unit_inhabitant))))))))))))))))))))))))))))))))})
+                                                                    (case fromGetCurrentTime
+                                                                           r of {
+                                                                      GHC.Base.Just _ ->
+                                                                       GHC.Base.Just
+                                                                       (ExistT __
+                                                                       (SetSecret
+                                                                       ((,) ((,)
+                                                                       ((,)
+                                                                       (cipherHash
+                                                                         c) c)
+                                                                       (hkdfExpandLabel
+                                                                         (cipherHash
+                                                                           c)
+                                                                         (hkdfExtract
+                                                                           (cipherHash
+                                                                           c)
+                                                                           (hkdfExpandLabel
+                                                                           (cipherHash
+                                                                           c)
+                                                                           (hkdfExtract
+                                                                           (cipherHash
+                                                                           c)
+                                                                           (hkdfExpandLabel
+                                                                           (cipherHash
+                                                                           c)
+                                                                           (hkdfExtract
+                                                                           (cipherHash
+                                                                           c)
+                                                                           (b_replicate
+                                                                           (hashDigestSize
+                                                                           (cipherHash
+                                                                           c)) w0)
+                                                                           b0)
+                                                                           (s2b ((:)
+                                                                           'd' ((:)
+                                                                           'e' ((:)
+                                                                           'r' ((:)
+                                                                           'i' ((:)
+                                                                           'v' ((:)
+                                                                           'e' ((:)
+                                                                           'd'
+                                                                           ([])))))))))
+                                                                           (hashWith
+                                                                           (cipherHash
+                                                                           c) ((:)
+                                                                           (s2b
+                                                                           ([]))
+                                                                           []))
+                                                                           (hashDigestSize
+                                                                           (cipherHash
+                                                                           c)))
+                                                                           (ba_convert
+                                                                           (snd p)))
+                                                                           (s2b ((:)
+                                                                           'd' ((:)
+                                                                           'e' ((:)
+                                                                           'r' ((:)
+                                                                           'i' ((:)
+                                                                           'v' ((:)
+                                                                           'e' ((:)
+                                                                           'd'
+                                                                           ([])))))))))
+                                                                           (hashWith
+                                                                           (cipherHash
+                                                                           c) ((:)
+                                                                           (s2b
+                                                                           ([]))
+                                                                           []))
+                                                                           (hashDigestSize
+                                                                           (cipherHash
+                                                                           c)))
+                                                                           (b_replicate
+                                                                           (hashDigestSize
+                                                                           (cipherHash
+                                                                           c)) w0))
+                                                                         (s2b ((:)
+                                                                           's' ((:)
+                                                                           ' ' ((:)
+                                                                           'a' ((:)
+                                                                           'p' ((:)
+                                                                           ' ' ((:)
+                                                                           't' ((:)
+                                                                           'r' ((:)
+                                                                           'a' ((:)
+                                                                           'f' ((:)
+                                                                           'f' ((:)
+                                                                           'i' ((:)
+                                                                           'c'
+                                                                           ([]))))))))))))))
+                                                                         (hashWith
+                                                                           (cipherHash
+                                                                           c)
+                                                                           (app l
+                                                                           ((:) b2
+                                                                           [])))
+                                                                         (hashDigestSize
+                                                                           (cipherHash
+                                                                           c))))
+                                                                       GHC.Base.False)));
+                                                                      GHC.Base.Nothing ->
+                                                                       GHC.Base.Nothing})))))))))))
+                                                    (sum_merge
+                                                      (prod_curry
+                                                        (prod_curry
+                                                          (prod_curry
+                                                            (prod_curry
+                                                              (prod_curry
+                                                                (prod_curry
+                                                                  (prod_curry
+                                                                    (prod_curry
+                                                                      (\_ b c p b0 b1 l b2 b3 _ _ ->
+                                                                      Prelude.Left
+                                                                      ((,)
+                                                                      (Prelude.Right
+                                                                      (Prelude.Right
+                                                                      (Prelude.Right
+                                                                      (Prelude.Right
+                                                                      (Prelude.Right
+                                                                      (Prelude.Right
+                                                                      (Prelude.Right
+                                                                      (Prelude.Right
+                                                                      (Prelude.Right
+                                                                      (Prelude.Right
+                                                                      (Prelude.Right
+                                                                      (Prelude.Right
+                                                                      (Prelude.Right
+                                                                      (Prelude.Right
+                                                                      (Prelude.Right
+                                                                      (Prelude.Right
+                                                                      (Prelude.Right
+                                                                      (Prelude.Right
+                                                                      (Prelude.Right
+                                                                      (Prelude.Right
+                                                                      (Prelude.Right
+                                                                      (Prelude.Right
+                                                                      (Prelude.Right
+                                                                      (Prelude.Right
+                                                                      (Prelude.Right
+                                                                      (Prelude.Left
+                                                                      ((,) ((,) ((,)
+                                                                      ((,) ((,) ((,)
+                                                                      ((,) ((,) ()
+                                                                      b) c) p) b0)
+                                                                      b1) l) b2)
+                                                                      b3)))))))))))))))))))))))))))
+                                                                      (GHC.Base.Just
+                                                                      (ExistT __
+                                                                      (SetSecret
+                                                                      ((,) ((,) ((,)
+                                                                      (cipherHash c)
+                                                                      c)
+                                                                      (hkdfExpandLabel
+                                                                        (cipherHash
+                                                                          c)
+                                                                        (hkdfExtract
+                                                                          (cipherHash
+                                                                           c)
+                                                                          (hkdfExpandLabel
+                                                                           (cipherHash
+                                                                           c)
+                                                                           (hkdfExtract
+                                                                           (cipherHash
+                                                                           c)
+                                                                           (hkdfExpandLabel
+                                                                           (cipherHash
+                                                                           c)
+                                                                           (hkdfExtract
+                                                                           (cipherHash
+                                                                           c)
+                                                                           (b_replicate
+                                                                           (hashDigestSize
+                                                                           (cipherHash
+                                                                           c)) w0)
+                                                                           b0)
+                                                                           (s2b ((:)
+                                                                           'd' ((:)
+                                                                           'e' ((:)
+                                                                           'r' ((:)
+                                                                           'i' ((:)
+                                                                           'v' ((:)
+                                                                           'e' ((:)
+                                                                           'd'
+                                                                           ([])))))))))
+                                                                           (hashWith
+                                                                           (cipherHash
+                                                                           c) ((:)
+                                                                           (s2b
+                                                                           ([]))
+                                                                           []))
+                                                                           (hashDigestSize
+                                                                           (cipherHash
+                                                                           c)))
+                                                                           (ba_convert
+                                                                           (snd p)))
+                                                                           (s2b ((:)
+                                                                           'd' ((:)
+                                                                           'e' ((:)
+                                                                           'r' ((:)
+                                                                           'i' ((:)
+                                                                           'v' ((:)
+                                                                           'e' ((:)
+                                                                           'd'
+                                                                           ([])))))))))
+                                                                           (hashWith
+                                                                           (cipherHash
+                                                                           c) ((:)
+                                                                           (s2b
+                                                                           ([]))
+                                                                           []))
+                                                                           (hashDigestSize
+                                                                           (cipherHash
+                                                                           c)))
+                                                                          (b_replicate
+                                                                           (hashDigestSize
+                                                                           (cipherHash
+                                                                           c)) w0))
+                                                                        (s2b ((:)
+                                                                          'c' ((:)
+                                                                          ' ' ((:)
+                                                                          'a' ((:)
+                                                                          'p' ((:)
+                                                                          ' ' ((:)
+                                                                          't' ((:)
+                                                                          'r' ((:)
+                                                                          'a' ((:)
+                                                                          'f' ((:)
+                                                                          'f' ((:)
+                                                                          'i' ((:)
+                                                                          'c'
+                                                                          ([]))))))))))))))
+                                                                        (hashWith
+                                                                          (cipherHash
+                                                                           c)
+                                                                          (app l
+                                                                           ((:) b2
+                                                                           [])))
+                                                                        (hashDigestSize
+                                                                          (cipherHash
+                                                                           c))))
+                                                                      GHC.Base.True))))))))))))))
+                                                      (sum_merge
+                                                        (prod_curry
+                                                          (prod_curry
+                                                            (prod_curry
+                                                              (prod_curry
+                                                                (prod_curry
+                                                                  (prod_curry
+                                                                    (prod_curry
+                                                                      (prod_curry
+                                                                        (\_ b c p b0 b1 l b2 b3 _ _ ->
+                                                                        Prelude.Left
+                                                                        ((,)
+                                                                        (case 
+                                                                         byteString_beq
+                                                                           b3
+                                                                           (makeVerifyData
+                                                                           (cipherHash
+                                                                           c)
+                                                                           (hkdfExpandLabel
+                                                                           (cipherHash
+                                                                           c)
+                                                                           (hkdfExtract
+                                                                           (cipherHash
+                                                                           c)
+                                                                           (hkdfExpandLabel
+                                                                           (cipherHash
+                                                                           c)
+                                                                           (hkdfExtract
+                                                                           (cipherHash
+                                                                           c)
+                                                                           (b_replicate
+                                                                           (hashDigestSize
+                                                                           (cipherHash
+                                                                           c)) w0)
+                                                                           b0)
+                                                                           (s2b ((:)
+                                                                           'd' ((:)
+                                                                           'e' ((:)
+                                                                           'r' ((:)
+                                                                           'i' ((:)
+                                                                           'v' ((:)
+                                                                           'e' ((:)
+                                                                           'd'
+                                                                           ([])))))))))
+                                                                           (hashWith
+                                                                           (cipherHash
+                                                                           c) ((:)
+                                                                           (s2b
+                                                                           ([]))
+                                                                           []))
+                                                                           (hashDigestSize
+                                                                           (cipherHash
+                                                                           c)))
+                                                                           (ba_convert
+                                                                           (snd p)))
+                                                                           (s2b ((:)
+                                                                           'c' ((:)
+                                                                           ' ' ((:)
+                                                                           'h' ((:)
+                                                                           's' ((:)
+                                                                           ' ' ((:)
+                                                                           't' ((:)
+                                                                           'r' ((:)
+                                                                           'a' ((:)
+                                                                           'f' ((:)
+                                                                           'f' ((:)
+                                                                           'i' ((:)
+                                                                           'c'
+                                                                           ([]))))))))))))))
+                                                                           (hashWith
+                                                                           (cipherHash
+                                                                           c) ((:) b
+                                                                           ((:) b1
+                                                                           [])))
+                                                                           (hashDigestSize
+                                                                           (cipherHash
+                                                                           c)))
+                                                                           (hashWith
+                                                                           (cipherHash
+                                                                           c)
+                                                                           (app l
+                                                                           ((:) b2
+                                                                           [])))) of {
+                                                                          GHC.Base.True ->
+                                                                           Prelude.Right
+                                                                           (Prelude.Right
+                                                                           (Prelude.Right
+                                                                           (Prelude.Right
+                                                                           (Prelude.Right
+                                                                           (Prelude.Right
+                                                                           (Prelude.Right
+                                                                           (Prelude.Right
+                                                                           (Prelude.Right
+                                                                           (Prelude.Right
+                                                                           (Prelude.Right
+                                                                           (Prelude.Right
+                                                                           (Prelude.Right
+                                                                           (Prelude.Right
+                                                                           (Prelude.Right
+                                                                           (Prelude.Right
+                                                                           (Prelude.Right
+                                                                           (Prelude.Right
+                                                                           (Prelude.Right
+                                                                           (Prelude.Right
+                                                                           (Prelude.Right
+                                                                           (Prelude.Right
+                                                                           (Prelude.Right
+                                                                           (Prelude.Right
+                                                                           (Prelude.Right
+                                                                           (Prelude.Right
+                                                                           (Prelude.Left
+                                                                           ()))))))))))))))))))))))))));
+                                                                          GHC.Base.False ->
+                                                                           Prelude.Right
+                                                                           (Prelude.Left
+                                                                           ())})
+                                                                        (case 
+                                                                         byteString_beq
+                                                                           b3
+                                                                           (makeVerifyData
+                                                                           (cipherHash
+                                                                           c)
+                                                                           (hkdfExpandLabel
+                                                                           (cipherHash
+                                                                           c)
+                                                                           (hkdfExtract
+                                                                           (cipherHash
+                                                                           c)
+                                                                           (hkdfExpandLabel
+                                                                           (cipherHash
+                                                                           c)
+                                                                           (hkdfExtract
+                                                                           (cipherHash
+                                                                           c)
+                                                                           (b_replicate
+                                                                           (hashDigestSize
+                                                                           (cipherHash
+                                                                           c)) w0)
+                                                                           b0)
+                                                                           (s2b ((:)
+                                                                           'd' ((:)
+                                                                           'e' ((:)
+                                                                           'r' ((:)
+                                                                           'i' ((:)
+                                                                           'v' ((:)
+                                                                           'e' ((:)
+                                                                           'd'
+                                                                           ([])))))))))
+                                                                           (hashWith
+                                                                           (cipherHash
+                                                                           c) ((:)
+                                                                           (s2b
+                                                                           ([]))
+                                                                           []))
+                                                                           (hashDigestSize
+                                                                           (cipherHash
+                                                                           c)))
+                                                                           (ba_convert
+                                                                           (snd p)))
+                                                                           (s2b ((:)
+                                                                           'c' ((:)
+                                                                           ' ' ((:)
+                                                                           'h' ((:)
+                                                                           's' ((:)
+                                                                           ' ' ((:)
+                                                                           't' ((:)
+                                                                           'r' ((:)
+                                                                           'a' ((:)
+                                                                           'f' ((:)
+                                                                           'f' ((:)
+                                                                           'i' ((:)
+                                                                           'c'
+                                                                           ([]))))))))))))))
+                                                                           (hashWith
+                                                                           (cipherHash
+                                                                           c) ((:) b
+                                                                           ((:) b1
+                                                                           [])))
+                                                                           (hashDigestSize
+                                                                           (cipherHash
+                                                                           c)))
+                                                                           (hashWith
+                                                                           (cipherHash
+                                                                           c)
+                                                                           (app l
+                                                                           ((:) b2
+                                                                           [])))) of {
+                                                                          GHC.Base.True ->
+                                                                           GHC.Base.Just
+                                                                           (ExistT
+                                                                           __
+                                                                           (RecvPacket
+                                                                           (Prelude.Left
+                                                                           (Prelude.Left
+                                                                           (Prelude.Left
+                                                                           ())))));
+                                                                          GHC.Base.False ->
+                                                                           GHC.Base.Just
+                                                                           (ExistT
+                                                                           __
+                                                                           (SendPacket
+                                                                           (I.Alert13
+                                                                           ((:) ((,)
+                                                                           I.AlertLevel_Fatal
+                                                                           I.DecryptError)
+                                                                           []))))})))))))))))
+                                                        (sum_merge (\_ _ r ->
+                                                          Prelude.Left ((,)
+                                                          (case fromRecvAppData r of {
+                                                            GHC.Base.Just a ->
+                                                             Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Right
+                                                             (Prelude.Left ((,) ()
+                                                             a))))))))))))))))))))))))))));
+                                                            GHC.Base.Nothing ->
+                                                             case retAlert r of {
+                                                              GHC.Base.Just a ->
+                                                               Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Left ((,) ()
+                                                               a))))))))))))))))))))))))))))));
+                                                              GHC.Base.Nothing ->
+                                                               Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (Prelude.Right
+                                                               (inhabitant
+                                                                 unit_inhabitant))))))))))))))))))))))))))))))))}})
+                                                          (case fromRecvAppData r of {
+                                                            GHC.Base.Just a ->
+                                                             GHC.Base.Just (ExistT
+                                                             __ (SendPacket
+                                                             (I.AppData13
+                                                             (mconcat ((:)
+                                                               (s2b ((:) 'H' ((:)
+                                                                 'T' ((:) 'T' ((:)
+                                                                 'P' ((:) '/' ((:)
+                                                                 '1' ((:) '.' ((:)
+                                                                 '1' ((:) ' ' ((:)
+                                                                 '2' ((:) '0' ((:)
+                                                                 '0' ((:) ' ' ((:)
+                                                                 'O' ((:) 'K' ((:)
+                                                                 '\r' ((:) '\n' ((:)
+                                                                 'C' ((:) 'o' ((:)
+                                                                 'n' ((:) 't' ((:)
+                                                                 'e' ((:) 'n' ((:)
+                                                                 't' ((:) '-' ((:)
+                                                                 'T' ((:) 'y' ((:)
+                                                                 'p' ((:) 'e' ((:)
+                                                                 ':' ((:) ' ' ((:)
+                                                                 't' ((:) 'e' ((:)
+                                                                 'x' ((:) 't' ((:)
+                                                                 '/' ((:) 'p' ((:)
+                                                                 'l' ((:) 'a' ((:)
+                                                                 'i' ((:) 'n' ((:)
+                                                                 '\r' ((:) '\n' ((:)
+                                                                 '\r' ((:) '\n' ((:)
+                                                                 'H' ((:) 'e' ((:)
+                                                                 'l' ((:) 'l' ((:)
+                                                                 'o' ((:) ',' ((:)
+                                                                 ' '
+                                                                 ([]))))))))))))))))))))))))))))))))))))))))))))))))))))))
+                                                               ((:) a ((:)
+                                                               (s2b ((:) '!' ((:)
+                                                                 '\r' lF))) [])))))));
+                                                            GHC.Base.Nothing ->
+                                                             case retAlert r of {
+                                                              GHC.Base.Just a ->
+                                                               GHC.Base.Just (ExistT
+                                                               __ (SendPacket
+                                                               (I.Alert13 ((:) a
+                                                               []))));
+                                                              GHC.Base.Nothing ->
+                                                               GHC.Base.Nothing}})))
+                                                          (sum_merge
+                                                            (prod_curry (\_ _ _ r ->
+                                                              Prelude.Left ((,)
+                                                              (case fromSendPacket r of {
+                                                                GHC.Base.Just _ ->
+                                                                 Prelude.Right
+                                                                 (Prelude.Right
+                                                                 (Prelude.Right
+                                                                 (Prelude.Right
+                                                                 (Prelude.Right
+                                                                 (Prelude.Right
+                                                                 (Prelude.Right
+                                                                 (Prelude.Right
+                                                                 (Prelude.Right
+                                                                 (Prelude.Right
+                                                                 (Prelude.Right
+                                                                 (Prelude.Right
+                                                                 (Prelude.Right
+                                                                 (Prelude.Right
+                                                                 (Prelude.Right
+                                                                 (Prelude.Right
+                                                                 (Prelude.Right
+                                                                 (Prelude.Right
+                                                                 (Prelude.Right
+                                                                 (Prelude.Right
+                                                                 (Prelude.Right
+                                                                 (Prelude.Right
+                                                                 (Prelude.Right
+                                                                 (Prelude.Right
+                                                                 (Prelude.Right
+                                                                 (Prelude.Right
+                                                                 (Prelude.Right
+                                                                 (Prelude.Right
+                                                                 (Prelude.Left
+                                                                 ()))))))))))))))))))))))))))));
+                                                                GHC.Base.Nothing ->
+                                                                 Prelude.Right
+                                                                 (Prelude.Right
+                                                                 (Prelude.Right
+                                                                 (Prelude.Right
+                                                                 (Prelude.Right
+                                                                 (Prelude.Right
+                                                                 (Prelude.Right
+                                                                 (Prelude.Right
+                                                                 (Prelude.Right
+                                                                 (Prelude.Right
+                                                                 (Prelude.Right
+                                                                 (Prelude.Right
+                                                                 (Prelude.Right
+                                                                 (Prelude.Right
+                                                                 (Prelude.Right
+                                                                 (Prelude.Right
+                                                                 (Prelude.Right
+                                                                 (Prelude.Right
+                                                                 (Prelude.Right
+                                                                 (Prelude.Right
+                                                                 (Prelude.Right
+                                                                 (Prelude.Right
+                                                                 (Prelude.Right
+                                                                 (Prelude.Right
+                                                                 (Prelude.Right
+                                                                 (Prelude.Right
+                                                                 (Prelude.Right
+                                                                 (Prelude.Right
+                                                                 (Prelude.Right
+                                                                 (Prelude.Right
+                                                                 (Prelude.Right
+                                                                 (Prelude.Right
+                                                                 (inhabitant
+                                                                   unit_inhabitant))))))))))))))))))))))))))))))))})
+                                                              (case fromSendPacket r of {
+                                                                GHC.Base.Just _ ->
+                                                                 GHC.Base.Just
+                                                                 (ExistT __ (Close
+                                                                 ()));
+                                                                GHC.Base.Nothing ->
+                                                                 GHC.Base.Nothing}))))
+                                                            (sum_merge (\_ _ _ ->
+                                                              Prelude.Left ((,)
+                                                              (Prelude.Right
+                                                              (Prelude.Right
+                                                              (Prelude.Right
+                                                              (Prelude.Right
+                                                              (Prelude.Right
+                                                              (Prelude.Right
+                                                              (Prelude.Right
+                                                              (Prelude.Right
+                                                              (Prelude.Right
+                                                              (Prelude.Right
+                                                              (Prelude.Right
+                                                              (Prelude.Right
+                                                              (Prelude.Right
+                                                              (Prelude.Right
+                                                              (Prelude.Right
+                                                              (Prelude.Right
+                                                              (Prelude.Right
+                                                              (Prelude.Right
+                                                              (Prelude.Right
+                                                              (Prelude.Right
+                                                              (Prelude.Right
+                                                              (Prelude.Right
+                                                              (Prelude.Right
+                                                              (Prelude.Right
+                                                              (Prelude.Right
+                                                              (Prelude.Right
+                                                              (Prelude.Right
+                                                              (Prelude.Right
+                                                              (Prelude.Right
+                                                              (Prelude.Right
+                                                              (Prelude.Right
+                                                              (Prelude.Right
+                                                              ()))))))))))))))))))))))))))))))))
+                                                              GHC.Base.Nothing))
+                                                              (sum_merge
+                                                                (prod_curry
+                                                                  (\_ _ _ _ ->
+                                                                  Prelude.Left ((,)
+                                                                  (Prelude.Right
+                                                                  (Prelude.Right
+                                                                  (Prelude.Right
+                                                                  (Prelude.Right
+                                                                  (Prelude.Right
+                                                                  (Prelude.Right
+                                                                  (Prelude.Right
+                                                                  (Prelude.Right
+                                                                  (Prelude.Right
+                                                                  (Prelude.Right
+                                                                  (Prelude.Right
+                                                                  (Prelude.Right
+                                                                  (Prelude.Right
+                                                                  (Prelude.Right
+                                                                  (Prelude.Right
+                                                                  (Prelude.Right
+                                                                  (Prelude.Right
+                                                                  (Prelude.Right
+                                                                  (Prelude.Right
+                                                                  (Prelude.Right
+                                                                  (Prelude.Right
+                                                                  (Prelude.Right
+                                                                  (Prelude.Right
+                                                                  (Prelude.Right
+                                                                  (Prelude.Right
+                                                                  (Prelude.Right
+                                                                  (Prelude.Right
+                                                                  (Prelude.Right
+                                                                  (Prelude.Right
+                                                                  (Prelude.Right
+                                                                  (Prelude.Right
+                                                                  (Prelude.Right
+                                                                  (inhabitant
+                                                                    unit_inhabitant)))))))))))))))))))))))))))))))))
+                                                                  GHC.Base.Nothing)))
+                                                                (sum_merge
+                                                                  (prod_curry
+                                                                    (\_ _ _ _ ->
                                                                     Prelude.Left
                                                                     ((,)
                                                                     (Prelude.Right
@@ -2814,2077 +3766,52 @@ doHandshake_derive =
                                                                     (Prelude.Right
                                                                     (Prelude.Right
                                                                     (Prelude.Right
-                                                                    (Prelude.Right
-                                                                    (Prelude.Right
-                                                                    (Prelude.Right
-                                                                    (Prelude.Right
-                                                                    ()))))))))))))))))))))))))))))))))))))
-                                                                    GHC.Base.Nothing)))))))))))))
-                                              (sum_merge
-                                                (prod_curry
-                                                  (prod_curry
-                                                    (prod_curry
-                                                      (prod_curry
-                                                        (prod_curry
-                                                          (prod_curry
-                                                            (prod_curry
-                                                              (\_ b c c0 p b0 b1 l _ r ->
-                                                              Prelude.Left ((,)
-                                                              (case fromSendPacket r of {
-                                                                GHC.Base.Just a ->
-                                                                 Prelude.Right
-                                                                 (Prelude.Right
-                                                                 (Prelude.Right
-                                                                 (Prelude.Right
-                                                                 (Prelude.Right
-                                                                 (Prelude.Right
-                                                                 (Prelude.Right
-                                                                 (Prelude.Right
-                                                                 (Prelude.Right
-                                                                 (Prelude.Right
-                                                                 (Prelude.Right
-                                                                 (Prelude.Right
-                                                                 (Prelude.Right
-                                                                 (Prelude.Right
-                                                                 (Prelude.Right
-                                                                 (Prelude.Right
-                                                                 (Prelude.Right
-                                                                 (Prelude.Right
-                                                                 (Prelude.Right
-                                                                 (Prelude.Right
-                                                                 (Prelude.Right
-                                                                 (Prelude.Right
-                                                                 (Prelude.Left ((,)
-                                                                 ((,) ((,) ((,) ((,)
-                                                                 ((,) ((,) ((,) ()
-                                                                 b) c) c0) p) b0)
-                                                                 b1) l)
-                                                                 a)))))))))))))))))))))));
-                                                                GHC.Base.Nothing ->
-                                                                 Prelude.Right
-                                                                 (Prelude.Right
-                                                                 (Prelude.Right
-                                                                 (Prelude.Right
-                                                                 (Prelude.Right
-                                                                 (Prelude.Right
-                                                                 (Prelude.Right
-                                                                 (Prelude.Right
-                                                                 (Prelude.Right
-                                                                 (Prelude.Right
-                                                                 (Prelude.Right
-                                                                 (Prelude.Right
-                                                                 (Prelude.Right
-                                                                 (Prelude.Right
-                                                                 (Prelude.Right
-                                                                 (Prelude.Right
-                                                                 (Prelude.Right
-                                                                 (Prelude.Right
-                                                                 (Prelude.Right
-                                                                 (Prelude.Right
-                                                                 (Prelude.Right
-                                                                 (Prelude.Right
-                                                                 (Prelude.Right
-                                                                 (Prelude.Right
-                                                                 (Prelude.Right
-                                                                 (Prelude.Right
-                                                                 (Prelude.Right
-                                                                 (Prelude.Right
-                                                                 (Prelude.Right
-                                                                 (Prelude.Right
-                                                                 (Prelude.Right
-                                                                 (Prelude.Right
-                                                                 (Prelude.Right
-                                                                 (Prelude.Right
-                                                                 (Prelude.Right
-                                                                 (Prelude.Right
-                                                                 (inhabitant
-                                                                   unit_inhabitant))))))))))))))))))))))))))))))))))))})
-                                                              (case fromSendPacket r of {
-                                                                GHC.Base.Just _ ->
-                                                                 GHC.Base.Just
-                                                                 (ExistT __
-                                                                 (GetCurrentTime
-                                                                 ()));
-                                                                GHC.Base.Nothing ->
-                                                                 GHC.Base.Nothing}))))))))))
-                                                (sum_merge
-                                                  (prod_curry
-                                                    (prod_curry
-                                                      (prod_curry
-                                                        (prod_curry
-                                                          (prod_curry
-                                                            (prod_curry
-                                                              (prod_curry
-                                                                (prod_curry
-                                                                  (\_ b c c0 p b0 b1 l b2 _ r ->
-                                                                  Prelude.Left ((,)
-                                                                  (case fromGetCurrentTime
-                                                                          r of {
-                                                                    GHC.Base.Just a ->
-                                                                     Prelude.Right
-                                                                     (Prelude.Right
-                                                                     (Prelude.Right
-                                                                     (Prelude.Right
-                                                                     (Prelude.Right
-                                                                     (Prelude.Right
-                                                                     (Prelude.Right
-                                                                     (Prelude.Right
-                                                                     (Prelude.Right
-                                                                     (Prelude.Right
-                                                                     (Prelude.Right
-                                                                     (Prelude.Right
-                                                                     (Prelude.Right
-                                                                     (Prelude.Right
-                                                                     (Prelude.Right
-                                                                     (Prelude.Right
-                                                                     (Prelude.Right
-                                                                     (Prelude.Right
-                                                                     (Prelude.Right
-                                                                     (Prelude.Right
-                                                                     (Prelude.Right
-                                                                     (Prelude.Right
-                                                                     (Prelude.Right
-                                                                     (Prelude.Left
-                                                                     ((,) ((,) ((,)
-                                                                     ((,) ((,) ((,)
-                                                                     ((,) ((,) ((,)
-                                                                     () b) c) c0) p)
-                                                                     b0) b1) l) b2)
-                                                                     a))))))))))))))))))))))));
-                                                                    GHC.Base.Nothing ->
-                                                                     Prelude.Right
-                                                                     (Prelude.Right
-                                                                     (Prelude.Right
-                                                                     (Prelude.Right
-                                                                     (Prelude.Right
-                                                                     (Prelude.Right
-                                                                     (Prelude.Right
-                                                                     (Prelude.Right
-                                                                     (Prelude.Right
-                                                                     (Prelude.Right
-                                                                     (Prelude.Right
-                                                                     (Prelude.Right
-                                                                     (Prelude.Right
-                                                                     (Prelude.Right
-                                                                     (Prelude.Right
-                                                                     (Prelude.Right
-                                                                     (Prelude.Right
-                                                                     (Prelude.Right
-                                                                     (Prelude.Right
-                                                                     (Prelude.Right
-                                                                     (Prelude.Right
-                                                                     (Prelude.Right
-                                                                     (Prelude.Right
-                                                                     (Prelude.Right
-                                                                     (Prelude.Right
-                                                                     (Prelude.Right
-                                                                     (Prelude.Right
-                                                                     (Prelude.Right
-                                                                     (Prelude.Right
-                                                                     (Prelude.Right
-                                                                     (Prelude.Right
-                                                                     (Prelude.Right
-                                                                     (Prelude.Right
-                                                                     (Prelude.Right
-                                                                     (Prelude.Right
-                                                                     (Prelude.Right
-                                                                     (inhabitant
-                                                                       unit_inhabitant))))))))))))))))))))))))))))))))))))})
-                                                                  (case fromGetCurrentTime
-                                                                          r of {
-                                                                    GHC.Base.Just _ ->
-                                                                     GHC.Base.Just
-                                                                     (ExistT __
-                                                                     (RecvPacket
-                                                                     (Prelude.Left
-                                                                     (Prelude.Right
-                                                                     ()))));
-                                                                    GHC.Base.Nothing ->
-                                                                     GHC.Base.Nothing})))))))))))
-                                                  (sum_merge
-                                                    (prod_curry
-                                                      (prod_curry
-                                                        (prod_curry
-                                                          (prod_curry
-                                                            (prod_curry
-                                                              (prod_curry
-                                                                (prod_curry
-                                                                  (prod_curry
-                                                                    (prod_curry
-                                                                      (\_ b c c0 p b0 b1 l b2 w _ r ->
-                                                                      Prelude.Left
-                                                                      ((,)
-                                                                      (case 
-                                                                       fromRecvCCS r of {
-                                                                        GHC.Base.Just _ ->
-                                                                         Prelude.Right
-                                                                         (Prelude.Right
-                                                                         (Prelude.Right
-                                                                         (Prelude.Right
-                                                                         (Prelude.Right
-                                                                         (Prelude.Right
-                                                                         (Prelude.Right
-                                                                         (Prelude.Right
-                                                                         (Prelude.Right
-                                                                         (Prelude.Right
-                                                                         (Prelude.Right
-                                                                         (Prelude.Right
-                                                                         (Prelude.Right
-                                                                         (Prelude.Right
-                                                                         (Prelude.Right
-                                                                         (Prelude.Right
-                                                                         (Prelude.Right
-                                                                         (Prelude.Right
-                                                                         (Prelude.Right
-                                                                         (Prelude.Right
-                                                                         (Prelude.Right
-                                                                         (Prelude.Right
-                                                                         (Prelude.Right
-                                                                         (Prelude.Right
-                                                                         (Prelude.Left
-                                                                         ((,) ((,)
-                                                                         ((,) ((,)
-                                                                         ((,) ((,)
-                                                                         ((,) ((,)
-                                                                         ((,) () b)
-                                                                         c) c0) p)
-                                                                         b0) b1) l)
-                                                                         b2)
-                                                                         w)))))))))))))))))))))))));
-                                                                        GHC.Base.Nothing ->
-                                                                         case 
-                                                                         retAlert r of {
-                                                                          GHC.Base.Just a ->
-                                                                           Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Left
-                                                                           ((,) ()
-                                                                           a)))))))))))))))))))))))))))))))))));
-                                                                          GHC.Base.Nothing ->
-                                                                           Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (inhabitant
-                                                                           unit_inhabitant))))))))))))))))))))))))))))))))))))}})
-                                                                      (case 
-                                                                       fromRecvCCS r of {
-                                                                        GHC.Base.Just _ ->
-                                                                         GHC.Base.Just
-                                                                         (ExistT __
-                                                                         (SetSecret
-                                                                         ((,) ((,)
-                                                                         ((,)
-                                                                         (cipherHash
-                                                                           c) c)
-                                                                         (hkdfExpandLabel
-                                                                           (cipherHash
-                                                                           c)
-                                                                           (hkdfExtract
-                                                                           (cipherHash
-                                                                           c)
-                                                                           (hkdfExpandLabel
-                                                                           (cipherHash
-                                                                           c)
-                                                                           (hkdfExtract
-                                                                           (cipherHash
-                                                                           c)
-                                                                           (b_replicate
-                                                                           (hashDigestSize
-                                                                           (cipherHash
-                                                                           c)) w0)
-                                                                           b0)
-                                                                           (s2b ((:)
-                                                                           'd' ((:)
-                                                                           'e' ((:)
-                                                                           'r' ((:)
-                                                                           'i' ((:)
-                                                                           'v' ((:)
-                                                                           'e' ((:)
-                                                                           'd'
-                                                                           ([])))))))))
-                                                                           (hashWith
-                                                                           (cipherHash
-                                                                           c) ((:)
-                                                                           (s2b
-                                                                           ([]))
-                                                                           []))
-                                                                           (hashDigestSize
-                                                                           (cipherHash
-                                                                           c)))
-                                                                           (ba_convert
-                                                                           (snd p)))
-                                                                           (s2b ((:)
-                                                                           'c' ((:)
-                                                                           ' ' ((:)
-                                                                           'h' ((:)
-                                                                           's' ((:)
-                                                                           ' ' ((:)
-                                                                           't' ((:)
-                                                                           'r' ((:)
-                                                                           'a' ((:)
-                                                                           'f' ((:)
-                                                                           'f' ((:)
-                                                                           'i' ((:)
-                                                                           'c'
-                                                                           ([]))))))))))))))
-                                                                           (hashWith
-                                                                           (cipherHash
-                                                                           c) ((:) b
-                                                                           ((:) b1
-                                                                           [])))
-                                                                           (hashDigestSize
-                                                                           (cipherHash
-                                                                           c))))
-                                                                         GHC.Base.True)));
-                                                                        GHC.Base.Nothing ->
-                                                                         case 
-                                                                         retAlert r of {
-                                                                          GHC.Base.Just a ->
-                                                                           GHC.Base.Just
-                                                                           (ExistT
-                                                                           __
-                                                                           (SendPacket
-                                                                           (I.Alert13
-                                                                           ((:) a
-                                                                           []))));
-                                                                          GHC.Base.Nothing ->
-                                                                           GHC.Base.Nothing}}))))))))))))
-                                                    (sum_merge
-                                                      (prod_curry
-                                                        (prod_curry
-                                                          (prod_curry
-                                                            (prod_curry
-                                                              (prod_curry
-                                                                (prod_curry
-                                                                  (prod_curry
-                                                                    (prod_curry
-                                                                      (prod_curry
-                                                                        (\_ b c c0 p b0 b1 l b2 w _ r ->
-                                                                        Prelude.Left
-                                                                        ((,)
-                                                                        (case 
-                                                                         fromSetSecret
-                                                                           r of {
-                                                                          GHC.Base.Just _ ->
-                                                                           Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Left
-                                                                           ((,) ((,)
-                                                                           ((,) ((,)
-                                                                           ((,) ((,)
-                                                                           ((,) ((,)
-                                                                           ((,) ()
-                                                                           b) c) c0)
-                                                                           p) b0)
-                                                                           b1) l)
-                                                                           b2)
-                                                                           w))))))))))))))))))))))))));
-                                                                          GHC.Base.Nothing ->
-                                                                           Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (inhabitant
-                                                                           unit_inhabitant))))))))))))))))))))))))))))))))))))})
-                                                                        (case 
-                                                                         fromSetSecret
-                                                                           r of {
-                                                                          GHC.Base.Just _ ->
-                                                                           GHC.Base.Just
-                                                                           (ExistT
-                                                                           __
-                                                                           (RecvPacket
-                                                                           (Prelude.Left
-                                                                           (Prelude.Left
-                                                                           (Prelude.Right
-                                                                           ())))));
-                                                                          GHC.Base.Nothing ->
-                                                                           GHC.Base.Nothing}))))))))))))
-                                                      (sum_merge
-                                                        (prod_curry
-                                                          (prod_curry
-                                                            (prod_curry
-                                                              (prod_curry
-                                                                (prod_curry
-                                                                  (prod_curry
-                                                                    (prod_curry
-                                                                      (prod_curry
-                                                                        (prod_curry
-                                                                          (\_ b c c0 p b0 b1 l b2 w _ r ->
-                                                                          Prelude.Left
-                                                                          ((,)
-                                                                          (case 
-                                                                           fromRecvFinished
-                                                                           r of {
-                                                                            GHC.Base.Just a ->
-                                                                           Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Left
-                                                                           ((,) ((,)
-                                                                           ((,) ((,)
-                                                                           ((,) ((,)
-                                                                           ((,) ((,)
-                                                                           ((,) ((,)
-                                                                           () b) c)
-                                                                           c0) p)
-                                                                           b0) b1)
-                                                                           l) b2) w)
-                                                                           a)))))))))))))))))))))))))));
-                                                                            GHC.Base.Nothing ->
-                                                                           case 
-                                                                           retAlert
-                                                                           r of {
-                                                                            GHC.Base.Just a ->
-                                                                           Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Left
-                                                                           ((,) ()
-                                                                           a))))))))))))))))))))))))))))))))));
-                                                                            GHC.Base.Nothing ->
-                                                                           Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (inhabitant
-                                                                           unit_inhabitant))))))))))))))))))))))))))))))))))))}})
-                                                                          (case 
-                                                                           fromRecvFinished
-                                                                           r of {
-                                                                            GHC.Base.Just _ ->
-                                                                           GHC.Base.Just
-                                                                           (ExistT
-                                                                           __
-                                                                           (GetCurrentTime
-                                                                           ()));
-                                                                            GHC.Base.Nothing ->
-                                                                           case 
-                                                                           retAlert
-                                                                           r of {
-                                                                            GHC.Base.Just a ->
-                                                                           GHC.Base.Just
-                                                                           (ExistT
-                                                                           __
-                                                                           (SendPacket
-                                                                           (I.Alert13
-                                                                           ((:) a
-                                                                           []))));
-                                                                            GHC.Base.Nothing ->
-                                                                           GHC.Base.Nothing}}))))))))))))
-                                                        (sum_merge
-                                                          (prod_curry
-                                                            (prod_curry
-                                                              (prod_curry
-                                                                (prod_curry
-                                                                  (prod_curry
-                                                                    (prod_curry
-                                                                      (prod_curry
-                                                                        (prod_curry
-                                                                          (prod_curry
-                                                                           (prod_curry
-                                                                           (\_ b c c0 p b0 b1 l b2 w b3 _ r ->
-                                                                           Prelude.Left
-                                                                           ((,)
-                                                                           (case 
-                                                                           fromGetCurrentTime
-                                                                           r of {
-                                                                            GHC.Base.Just a ->
-                                                                           case 
-                                                                           byteString_beq
-                                                                           b3
-                                                                           (makeVerifyData
-                                                                           (cipherHash
-                                                                           c)
-                                                                           (hkdfExpandLabel
-                                                                           (cipherHash
-                                                                           c)
-                                                                           (hkdfExtract
-                                                                           (cipherHash
-                                                                           c)
-                                                                           (hkdfExpandLabel
-                                                                           (cipherHash
-                                                                           c)
-                                                                           (hkdfExtract
-                                                                           (cipherHash
-                                                                           c)
-                                                                           (b_replicate
-                                                                           (hashDigestSize
-                                                                           (cipherHash
-                                                                           c)) w0)
-                                                                           b0)
-                                                                           (s2b ((:)
-                                                                           'd' ((:)
-                                                                           'e' ((:)
-                                                                           'r' ((:)
-                                                                           'i' ((:)
-                                                                           'v' ((:)
-                                                                           'e' ((:)
-                                                                           'd'
-                                                                           ([])))))))))
-                                                                           (hashWith
-                                                                           (cipherHash
-                                                                           c) ((:)
-                                                                           (s2b
-                                                                           ([]))
-                                                                           []))
-                                                                           (hashDigestSize
-                                                                           (cipherHash
-                                                                           c)))
-                                                                           (ba_convert
-                                                                           (snd p)))
-                                                                           (s2b ((:)
-                                                                           'c' ((:)
-                                                                           ' ' ((:)
-                                                                           'h' ((:)
-                                                                           's' ((:)
-                                                                           ' ' ((:)
-                                                                           't' ((:)
-                                                                           'r' ((:)
-                                                                           'a' ((:)
-                                                                           'f' ((:)
-                                                                           'f' ((:)
-                                                                           'i' ((:)
-                                                                           'c'
-                                                                           ([]))))))))))))))
-                                                                           (hashWith
-                                                                           (cipherHash
-                                                                           c) ((:) b
-                                                                           ((:) b1
-                                                                           [])))
-                                                                           (hashDigestSize
-                                                                           (cipherHash
-                                                                           c)))
-                                                                           (hashWith
-                                                                           (cipherHash
-                                                                           c)
-                                                                           (app l
-                                                                           ((:) b2
-                                                                           [])))) of {
-                                                                            GHC.Base.True ->
-                                                                           Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Left
-                                                                           ((,) ((,)
-                                                                           ((,) ((,)
-                                                                           ((,) ((,)
-                                                                           ((,) ((,)
-                                                                           ((,) ()
-                                                                           c) c0) p)
-                                                                           b0) l)
-                                                                           b2) w)
-                                                                           b3)
-                                                                           a))))))))))))))))))))))))))));
-                                                                            GHC.Base.False ->
-                                                                           Prelude.Right
-                                                                           (Prelude.Left
-                                                                           ())};
-                                                                            GHC.Base.Nothing ->
-                                                                           Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (inhabitant
-                                                                           unit_inhabitant))))))))))))))))))))))))))))))))))))})
-                                                                           (case 
-                                                                           fromGetCurrentTime
-                                                                           r of {
-                                                                            GHC.Base.Just _ ->
-                                                                           case 
-                                                                           byteString_beq
-                                                                           b3
-                                                                           (makeVerifyData
-                                                                           (cipherHash
-                                                                           c)
-                                                                           (hkdfExpandLabel
-                                                                           (cipherHash
-                                                                           c)
-                                                                           (hkdfExtract
-                                                                           (cipherHash
-                                                                           c)
-                                                                           (hkdfExpandLabel
-                                                                           (cipherHash
-                                                                           c)
-                                                                           (hkdfExtract
-                                                                           (cipherHash
-                                                                           c)
-                                                                           (b_replicate
-                                                                           (hashDigestSize
-                                                                           (cipherHash
-                                                                           c)) w0)
-                                                                           b0)
-                                                                           (s2b ((:)
-                                                                           'd' ((:)
-                                                                           'e' ((:)
-                                                                           'r' ((:)
-                                                                           'i' ((:)
-                                                                           'v' ((:)
-                                                                           'e' ((:)
-                                                                           'd'
-                                                                           ([])))))))))
-                                                                           (hashWith
-                                                                           (cipherHash
-                                                                           c) ((:)
-                                                                           (s2b
-                                                                           ([]))
-                                                                           []))
-                                                                           (hashDigestSize
-                                                                           (cipherHash
-                                                                           c)))
-                                                                           (ba_convert
-                                                                           (snd p)))
-                                                                           (s2b ((:)
-                                                                           'c' ((:)
-                                                                           ' ' ((:)
-                                                                           'h' ((:)
-                                                                           's' ((:)
-                                                                           ' ' ((:)
-                                                                           't' ((:)
-                                                                           'r' ((:)
-                                                                           'a' ((:)
-                                                                           'f' ((:)
-                                                                           'f' ((:)
-                                                                           'i' ((:)
-                                                                           'c'
-                                                                           ([]))))))))))))))
-                                                                           (hashWith
-                                                                           (cipherHash
-                                                                           c) ((:) b
-                                                                           ((:) b1
-                                                                           [])))
-                                                                           (hashDigestSize
-                                                                           (cipherHash
-                                                                           c)))
-                                                                           (hashWith
-                                                                           (cipherHash
-                                                                           c)
-                                                                           (app l
-                                                                           ((:) b2
-                                                                           [])))) of {
-                                                                            GHC.Base.True ->
-                                                                           GHC.Base.Just
-                                                                           (ExistT
-                                                                           __
-                                                                           (GetRandomBytes
-                                                                           ((Prelude.+) 1
-                                                                           ((Prelude.+) 1
-                                                                           ((Prelude.+) 1
-                                                                           ((Prelude.+) 1
-                                                                           ((Prelude.+) 1
-                                                                           ((Prelude.+) 1
-                                                                           ((Prelude.+) 1
-                                                                           ((Prelude.+) 1
-                                                                           ((Prelude.+) 1
-                                                                           ((Prelude.+) 1
-                                                                           ((Prelude.+) 1
-                                                                           ((Prelude.+) 1
-                                                                           ((Prelude.+) 1
-                                                                           ((Prelude.+) 1
-                                                                           ((Prelude.+) 1
-                                                                           ((Prelude.+) 1
-                                                                           ((Prelude.+) 1
-                                                                           ((Prelude.+) 1
-                                                                           ((Prelude.+) 1
-                                                                           ((Prelude.+) 1
-                                                                           ((Prelude.+) 1
-                                                                           ((Prelude.+) 1
-                                                                           ((Prelude.+) 1
-                                                                           ((Prelude.+) 1
-                                                                           ((Prelude.+) 1
-                                                                           ((Prelude.+) 1
-                                                                           ((Prelude.+) 1
-                                                                           ((Prelude.+) 1
-                                                                           ((Prelude.+) 1
-                                                                           ((Prelude.+) 1
-                                                                           ((Prelude.+) 1
-                                                                           ((Prelude.+) 1
-                                                                           0))))))))))))))))))))))))))))))))));
-                                                                            GHC.Base.False ->
-                                                                           GHC.Base.Just
-                                                                           (ExistT
-                                                                           __
-                                                                           (SendPacket
-                                                                           (I.Alert13
-                                                                           ((:) ((,)
-                                                                           I.AlertLevel_Fatal
-                                                                           I.DecryptError)
-                                                                           []))))};
-                                                                            GHC.Base.Nothing ->
-                                                                           GHC.Base.Nothing})))))))))))))
-                                                          (sum_merge
-                                                            (prod_curry
-                                                              (prod_curry
-                                                                (prod_curry
-                                                                  (prod_curry
-                                                                    (prod_curry
-                                                                      (prod_curry
-                                                                        (prod_curry
-                                                                          (prod_curry
-                                                                           (prod_curry
-                                                                           (\_ c c0 p b l b0 w b1 w1 _ r ->
-                                                                           Prelude.Left
-                                                                           ((,)
-                                                                           (case 
-                                                                           fromGetRandomBytes
-                                                                           r of {
-                                                                            GHC.Base.Just a ->
-                                                                           Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Left
-                                                                           ((,) ((,)
-                                                                           ((,) ((,)
-                                                                           ((,) ((,)
-                                                                           ((,) ((,)
-                                                                           ((,) ((,)
-                                                                           () c) c0)
-                                                                           p) b) l)
-                                                                           b0) w)
-                                                                           b1) w1)
-                                                                           a)))))))))))))))))))))))))))));
-                                                                            GHC.Base.Nothing ->
-                                                                           Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (inhabitant
-                                                                           unit_inhabitant))))))))))))))))))))))))))))))))))))})
-                                                                           (case 
-                                                                           fromGetRandomBytes
-                                                                           r of {
-                                                                            GHC.Base.Just _ ->
-                                                                           GHC.Base.Just
-                                                                           (ExistT
-                                                                           __
-                                                                           (GetRandomBytes
-                                                                           ((Prelude.+) 1
-                                                                           ((Prelude.+) 1
-                                                                           ((Prelude.+) 1
-                                                                           ((Prelude.+) 1
-                                                                           0))))));
-                                                                            GHC.Base.Nothing ->
-                                                                           GHC.Base.Nothing}))))))))))))
-                                                            (sum_merge
-                                                              (prod_curry
-                                                                (prod_curry
-                                                                  (prod_curry
-                                                                    (prod_curry
-                                                                      (prod_curry
-                                                                        (prod_curry
-                                                                          (prod_curry
-                                                                           (prod_curry
-                                                                           (prod_curry
-                                                                           (prod_curry
-                                                                           (\_ c c0 p b l b0 w b1 w1 b2 _ r ->
-                                                                           Prelude.Left
-                                                                           ((,)
-                                                                           (case 
-                                                                           fromGetRandomBytes
-                                                                           r of {
-                                                                            GHC.Base.Just a ->
-                                                                           Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Left
-                                                                           ((,) ((,)
-                                                                           ((,) ((,)
-                                                                           ((,) ((,)
-                                                                           ((,) ((,)
-                                                                           ((,) ((,)
-                                                                           ((,) ()
-                                                                           c) c0) p)
-                                                                           b) l) b0)
-                                                                           w) b1)
-                                                                           w1) b2)
-                                                                           a))))))))))))))))))))))))))))));
-                                                                            GHC.Base.Nothing ->
-                                                                           Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (inhabitant
-                                                                           unit_inhabitant))))))))))))))))))))))))))))))))))))})
-                                                                           (case 
-                                                                           fromGetRandomBytes
-                                                                           r of {
-                                                                            GHC.Base.Just a ->
-                                                                           GHC.Base.Just
-                                                                           (ExistT
-                                                                           __
-                                                                           (SetPSK
-                                                                           ((,) ((:)
-                                                                           'T' ((:)
-                                                                           'e' ((:)
-                                                                           's' ((:)
-                                                                           't' ((:)
-                                                                           'S' ((:)
-                                                                           'e' ((:)
-                                                                           's' ((:)
-                                                                           's' ((:)
-                                                                           'i' ((:)
-                                                                           'o' ((:)
-                                                                           'n'
-                                                                           ([]))))))))))))
-                                                                           (I.SessionData
-                                                                           tLS13
-                                                                           (cipherID
-                                                                           c) (Prelude.fromIntegral 0)
-                                                                           (chooseServerName
-                                                                           (chExt
-                                                                           c0))
-                                                                           (hkdfExpandLabel
-                                                                           (cipherHash
-                                                                           c)
-                                                                           (hkdfExpandLabel
-                                                                           (cipherHash
-                                                                           c)
-                                                                           (hkdfExtract
-                                                                           (cipherHash
-                                                                           c)
-                                                                           (hkdfExpandLabel
-                                                                           (cipherHash
-                                                                           c)
-                                                                           (hkdfExtract
-                                                                           (cipherHash
-                                                                           c)
-                                                                           (hkdfExpandLabel
-                                                                           (cipherHash
-                                                                           c)
-                                                                           (hkdfExtract
-                                                                           (cipherHash
-                                                                           c)
-                                                                           (b_replicate
-                                                                           (hashDigestSize
-                                                                           (cipherHash
-                                                                           c)) w0)
-                                                                           b)
-                                                                           (s2b ((:)
-                                                                           'd' ((:)
-                                                                           'e' ((:)
-                                                                           'r' ((:)
-                                                                           'i' ((:)
-                                                                           'v' ((:)
-                                                                           'e' ((:)
-                                                                           'd'
-                                                                           ([])))))))))
-                                                                           (hashWith
-                                                                           (cipherHash
-                                                                           c) ((:)
-                                                                           (s2b
-                                                                           ([]))
-                                                                           []))
-                                                                           (hashDigestSize
-                                                                           (cipherHash
-                                                                           c)))
-                                                                           (ba_convert
-                                                                           (snd p)))
-                                                                           (s2b ((:)
-                                                                           'd' ((:)
-                                                                           'e' ((:)
-                                                                           'r' ((:)
-                                                                           'i' ((:)
-                                                                           'v' ((:)
-                                                                           'e' ((:)
-                                                                           'd'
-                                                                           ([])))))))))
-                                                                           (hashWith
-                                                                           (cipherHash
-                                                                           c) ((:)
-                                                                           (s2b
-                                                                           ([]))
-                                                                           []))
-                                                                           (hashDigestSize
-                                                                           (cipherHash
-                                                                           c)))
-                                                                           (b_replicate
-                                                                           (hashDigestSize
-                                                                           (cipherHash
-                                                                           c)) w0))
-                                                                           (s2b ((:)
-                                                                           'r' ((:)
-                                                                           'e' ((:)
-                                                                           's' ((:)
-                                                                           ' ' ((:)
-                                                                           'm' ((:)
-                                                                           'a' ((:)
-                                                                           's' ((:)
-                                                                           't' ((:)
-                                                                           'e' ((:)
-                                                                           'r'
-                                                                           ([]))))))))))))
-                                                                           (hashWith
-                                                                           (cipherHash
-                                                                           c)
-                                                                           (app l
-                                                                           ((:) b0
-                                                                           ((:)
-                                                                           (encodeHandshake13
-                                                                           (I.Finished13
-                                                                           b1))
-                                                                           []))))
-                                                                           (hashDigestSize
-                                                                           (cipherHash
-                                                                           c)))
-                                                                           (s2b ((:)
-                                                                           'r' ((:)
-                                                                           'e' ((:)
-                                                                           's' ((:)
-                                                                           'u' ((:)
-                                                                           'm' ((:)
-                                                                           'p' ((:)
-                                                                           't' ((:)
-                                                                           'i' ((:)
-                                                                           'o' ((:)
-                                                                           'n'
-                                                                           ([]))))))))))))
-                                                                           (s2b ((:)
-                                                                           '0'
-                                                                           ([])))
-                                                                           (hashDigestSize
-                                                                           (cipherHash
-                                                                           c)))
-                                                                           GHC.Base.Nothing
-                                                                           (GHC.Base.Just
-                                                                           (T.TLS13TicketInfo
-                                                                           life
-                                                                           (bytes2w32
-                                                                           a) w1
-                                                                           (GHC.Base.Just
-                                                                           (word64minus
-                                                                           w1 w))))
-                                                                           GHC.Base.Nothing
-                                                                           ((Prelude.+) 1
-                                                                           ((Prelude.+) 1
-                                                                           ((Prelude.+) 1
-                                                                           ((Prelude.+) 1
-                                                                           ((Prelude.+) 1
-                                                                           0)))))
-                                                                           []))));
-                                                                            GHC.Base.Nothing ->
-                                                                           GHC.Base.Nothing})))))))))))))
-                                                              (sum_merge
-                                                                (prod_curry
-                                                                  (prod_curry
-                                                                    (prod_curry
-                                                                      (prod_curry
-                                                                        (prod_curry
-                                                                          (prod_curry
-                                                                           (prod_curry
-                                                                           (prod_curry
-                                                                           (prod_curry
-                                                                           (prod_curry
-                                                                           (prod_curry
-                                                                           (\_ c _ p b l b0 _ _ _ b1 b2 _ r ->
-                                                                           Prelude.Left
-                                                                           ((,)
-                                                                           (case 
-                                                                           fromSetPSK
-                                                                           r of {
-                                                                            GHC.Base.Just _ ->
-                                                                           Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Left
-                                                                           ((,) ((,)
-                                                                           ((,) ((,)
-                                                                           ((,) ((,)
-                                                                           ((,) ()
-                                                                           c) p) b)
-                                                                           l) b0)
-                                                                           b1)
-                                                                           b2)))))))))))))))))))))))))))))));
-                                                                            GHC.Base.Nothing ->
-                                                                           Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (inhabitant
-                                                                           unit_inhabitant))))))))))))))))))))))))))))))))))))})
-                                                                           (case 
-                                                                           fromSetPSK
-                                                                           r of {
-                                                                            GHC.Base.Just _ ->
-                                                                           GHC.Base.Just
-                                                                           (ExistT
-                                                                           __
-                                                                           (SetSecret
-                                                                           ((,) ((,)
-                                                                           ((,)
-                                                                           (cipherHash
-                                                                           c) c)
-                                                                           (hkdfExpandLabel
-                                                                           (cipherHash
-                                                                           c)
-                                                                           (hkdfExtract
-                                                                           (cipherHash
-                                                                           c)
-                                                                           (hkdfExpandLabel
-                                                                           (cipherHash
-                                                                           c)
-                                                                           (hkdfExtract
-                                                                           (cipherHash
-                                                                           c)
-                                                                           (hkdfExpandLabel
-                                                                           (cipherHash
-                                                                           c)
-                                                                           (hkdfExtract
-                                                                           (cipherHash
-                                                                           c)
-                                                                           (b_replicate
-                                                                           (hashDigestSize
-                                                                           (cipherHash
-                                                                           c)) w0)
-                                                                           b)
-                                                                           (s2b ((:)
-                                                                           'd' ((:)
-                                                                           'e' ((:)
-                                                                           'r' ((:)
-                                                                           'i' ((:)
-                                                                           'v' ((:)
-                                                                           'e' ((:)
-                                                                           'd'
-                                                                           ([])))))))))
-                                                                           (hashWith
-                                                                           (cipherHash
-                                                                           c) ((:)
-                                                                           (s2b
-                                                                           ([]))
-                                                                           []))
-                                                                           (hashDigestSize
-                                                                           (cipherHash
-                                                                           c)))
-                                                                           (ba_convert
-                                                                           (snd p)))
-                                                                           (s2b ((:)
-                                                                           'd' ((:)
-                                                                           'e' ((:)
-                                                                           'r' ((:)
-                                                                           'i' ((:)
-                                                                           'v' ((:)
-                                                                           'e' ((:)
-                                                                           'd'
-                                                                           ([])))))))))
-                                                                           (hashWith
-                                                                           (cipherHash
-                                                                           c) ((:)
-                                                                           (s2b
-                                                                           ([]))
-                                                                           []))
-                                                                           (hashDigestSize
-                                                                           (cipherHash
-                                                                           c)))
-                                                                           (b_replicate
-                                                                           (hashDigestSize
-                                                                           (cipherHash
-                                                                           c)) w0))
-                                                                           (s2b ((:)
-                                                                           's' ((:)
-                                                                           ' ' ((:)
-                                                                           'a' ((:)
-                                                                           'p' ((:)
-                                                                           ' ' ((:)
-                                                                           't' ((:)
-                                                                           'r' ((:)
-                                                                           'a' ((:)
-                                                                           'f' ((:)
-                                                                           'f' ((:)
-                                                                           'i' ((:)
-                                                                           'c'
-                                                                           ([]))))))))))))))
-                                                                           (hashWith
-                                                                           (cipherHash
-                                                                           c)
-                                                                           (app l
-                                                                           ((:) b0
-                                                                           [])))
-                                                                           (hashDigestSize
-                                                                           (cipherHash
-                                                                           c))))
-                                                                           GHC.Base.False)));
-                                                                            GHC.Base.Nothing ->
-                                                                           GHC.Base.Nothing}))))))))))))))
-                                                                (sum_merge
-                                                                  (prod_curry
-                                                                    (prod_curry
-                                                                      (prod_curry
-                                                                        (prod_curry
-                                                                          (prod_curry
-                                                                           (prod_curry
-                                                                           (prod_curry
-                                                                           (\_ c p b l b0 b1 b2 _ r ->
-                                                                           Prelude.Left
-                                                                           ((,)
-                                                                           (case 
-                                                                           fromSetSecret
-                                                                           r of {
-                                                                            GHC.Base.Just _ ->
-                                                                           Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Left
-                                                                           ((,) ((,)
-                                                                           ((,) ((,)
-                                                                           ((,) ((,)
-                                                                           ((,) ()
-                                                                           c) p) b)
-                                                                           l) b0)
-                                                                           b1)
-                                                                           b2))))))))))))))))))))))))))))))));
-                                                                            GHC.Base.Nothing ->
-                                                                           Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (inhabitant
-                                                                           unit_inhabitant))))))))))))))))))))))))))))))))))))})
-                                                                           (case 
-                                                                           fromSetSecret
-                                                                           r of {
-                                                                            GHC.Base.Just _ ->
-                                                                           GHC.Base.Just
-                                                                           (ExistT
-                                                                           __
-                                                                           (SetSecret
-                                                                           ((,) ((,)
-                                                                           ((,)
-                                                                           (cipherHash
-                                                                           c) c)
-                                                                           (hkdfExpandLabel
-                                                                           (cipherHash
-                                                                           c)
-                                                                           (hkdfExtract
-                                                                           (cipherHash
-                                                                           c)
-                                                                           (hkdfExpandLabel
-                                                                           (cipherHash
-                                                                           c)
-                                                                           (hkdfExtract
-                                                                           (cipherHash
-                                                                           c)
-                                                                           (hkdfExpandLabel
-                                                                           (cipherHash
-                                                                           c)
-                                                                           (hkdfExtract
-                                                                           (cipherHash
-                                                                           c)
-                                                                           (b_replicate
-                                                                           (hashDigestSize
-                                                                           (cipherHash
-                                                                           c)) w0)
-                                                                           b)
-                                                                           (s2b ((:)
-                                                                           'd' ((:)
-                                                                           'e' ((:)
-                                                                           'r' ((:)
-                                                                           'i' ((:)
-                                                                           'v' ((:)
-                                                                           'e' ((:)
-                                                                           'd'
-                                                                           ([])))))))))
-                                                                           (hashWith
-                                                                           (cipherHash
-                                                                           c) ((:)
-                                                                           (s2b
-                                                                           ([]))
-                                                                           []))
-                                                                           (hashDigestSize
-                                                                           (cipherHash
-                                                                           c)))
-                                                                           (ba_convert
-                                                                           (snd p)))
-                                                                           (s2b ((:)
-                                                                           'd' ((:)
-                                                                           'e' ((:)
-                                                                           'r' ((:)
-                                                                           'i' ((:)
-                                                                           'v' ((:)
-                                                                           'e' ((:)
-                                                                           'd'
-                                                                           ([])))))))))
-                                                                           (hashWith
-                                                                           (cipherHash
-                                                                           c) ((:)
-                                                                           (s2b
-                                                                           ([]))
-                                                                           []))
-                                                                           (hashDigestSize
-                                                                           (cipherHash
-                                                                           c)))
-                                                                           (b_replicate
-                                                                           (hashDigestSize
-                                                                           (cipherHash
-                                                                           c)) w0))
-                                                                           (s2b ((:)
-                                                                           'c' ((:)
-                                                                           ' ' ((:)
-                                                                           'a' ((:)
-                                                                           'p' ((:)
-                                                                           ' ' ((:)
-                                                                           't' ((:)
-                                                                           'r' ((:)
-                                                                           'a' ((:)
-                                                                           'f' ((:)
-                                                                           'f' ((:)
-                                                                           'i' ((:)
-                                                                           'c'
-                                                                           ([]))))))))))))))
-                                                                           (hashWith
-                                                                           (cipherHash
-                                                                           c)
-                                                                           (app l
-                                                                           ((:) b0
-                                                                           [])))
-                                                                           (hashDigestSize
-                                                                           (cipherHash
-                                                                           c))))
-                                                                           GHC.Base.True)));
-                                                                            GHC.Base.Nothing ->
-                                                                           GHC.Base.Nothing}))))))))))
+                                                                    (inhabitant
+                                                                      unit_inhabitant)))))))))))))))))))))))))))))))))
+                                                                    GHC.Base.Nothing)))
                                                                   (sum_merge
                                                                     (prod_curry
-                                                                      (prod_curry
-                                                                        (prod_curry
-                                                                          (prod_curry
-                                                                           (prod_curry
-                                                                           (prod_curry
-                                                                           (prod_curry
-                                                                           (\_ _ _ _ _ _ b b0 _ r ->
-                                                                           Prelude.Left
-                                                                           ((,)
-                                                                           (case 
-                                                                           fromSetSecret
-                                                                           r of {
-                                                                            GHC.Base.Just _ ->
-                                                                           Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Left
-                                                                           ((,) ((,)
-                                                                           () b)
-                                                                           b0)))))))))))))))))))))))))))))))));
-                                                                            GHC.Base.Nothing ->
-                                                                           Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (inhabitant
-                                                                           unit_inhabitant))))))))))))))))))))))))))))))))))))})
-                                                                           (case 
-                                                                           fromSetSecret
-                                                                           r of {
-                                                                            GHC.Base.Just _ ->
-                                                                           GHC.Base.Just
-                                                                           (ExistT
-                                                                           __
-                                                                           (SendPacket
-                                                                           (I.Handshake13
-                                                                           ((:)
-                                                                           (I.NewSessionTicket13
-                                                                           life
-                                                                           (bytes2w32
-                                                                           b0) b
-                                                                           (s2b ((:)
-                                                                           'T' ((:)
-                                                                           'e' ((:)
-                                                                           's' ((:)
-                                                                           't' ((:)
-                                                                           'S' ((:)
-                                                                           'e' ((:)
-                                                                           's' ((:)
-                                                                           's' ((:)
-                                                                           'i' ((:)
-                                                                           'o' ((:)
-                                                                           'n'
-                                                                           ([])))))))))))))
-                                                                           [])
-                                                                           []))));
-                                                                            GHC.Base.Nothing ->
-                                                                           GHC.Base.Nothing}))))))))))
-                                                                    (sum_merge
-                                                                      (prod_curry
-                                                                        (prod_curry
-                                                                          (\_ _ _ _ r ->
-                                                                          Prelude.Left
-                                                                          ((,)
-                                                                          (case 
-                                                                           fromSendPacket
-                                                                           r of {
-                                                                            GHC.Base.Just _ ->
-                                                                           Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           ())))))))))))))))))))))))))))))))))));
-                                                                            GHC.Base.Nothing ->
-                                                                           Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (inhabitant
-                                                                           unit_inhabitant))))))))))))))))))))))))))))))))))))})
-                                                                          (case 
-                                                                           fromSendPacket
-                                                                           r of {
-                                                                            GHC.Base.Just _ ->
-                                                                           GHC.Base.Nothing;
-                                                                            GHC.Base.Nothing ->
-                                                                           GHC.Base.Nothing})))))
-                                                                      (sum_merge
-                                                                        (prod_curry
-                                                                          (\_ _ _ _ ->
-                                                                          Prelude.Left
-                                                                          ((,)
-                                                                          (Prelude.Right
-                                                                          (Prelude.Right
-                                                                          (Prelude.Right
-                                                                          (Prelude.Right
-                                                                          (Prelude.Right
-                                                                          (Prelude.Right
-                                                                          (Prelude.Right
-                                                                          (Prelude.Right
-                                                                          (Prelude.Right
-                                                                          (Prelude.Right
-                                                                          (Prelude.Right
-                                                                          (Prelude.Right
-                                                                          (Prelude.Right
-                                                                          (Prelude.Right
-                                                                          (Prelude.Right
-                                                                          (Prelude.Right
-                                                                          (Prelude.Right
-                                                                          (Prelude.Right
-                                                                          (Prelude.Right
-                                                                          (Prelude.Right
-                                                                          (Prelude.Right
-                                                                          (Prelude.Right
-                                                                          (Prelude.Right
-                                                                          (Prelude.Right
-                                                                          (Prelude.Right
-                                                                          (Prelude.Right
-                                                                          (Prelude.Right
-                                                                          (Prelude.Right
-                                                                          (Prelude.Right
-                                                                          (Prelude.Right
-                                                                          (Prelude.Right
-                                                                          (Prelude.Right
-                                                                          (Prelude.Right
-                                                                          (Prelude.Right
-                                                                          (Prelude.Right
-                                                                          (Prelude.Right
-                                                                          (inhabitant
-                                                                           unit_inhabitant)))))))))))))))))))))))))))))))))))))
-                                                                          GHC.Base.Nothing)))
-                                                                        (sum_merge
-                                                                          (prod_curry
-                                                                           (\_ _ _ _ ->
-                                                                           Prelude.Left
-                                                                           ((,)
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (inhabitant
-                                                                           unit_inhabitant)))))))))))))))))))))))))))))))))))))
-                                                                           GHC.Base.Nothing)))
-                                                                          (sum_merge
-                                                                           (prod_curry
-                                                                           (\_ _ _ _ ->
-                                                                           Prelude.Left
-                                                                           ((,)
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (Prelude.Right
-                                                                           (inhabitant
-                                                                           unit_inhabitant)))))))))))))))))))))))))))))))))))))
-                                                                           GHC.Base.Nothing)))
-                                                                           (\u _ _ ->
-                                                                           Prelude.Right
-                                                                           u)))))))))))))))))))))))))))))))))))))
+                                                                      (\_ _ _ _ ->
+                                                                      Prelude.Left
+                                                                      ((,)
+                                                                      (Prelude.Right
+                                                                      (Prelude.Right
+                                                                      (Prelude.Right
+                                                                      (Prelude.Right
+                                                                      (Prelude.Right
+                                                                      (Prelude.Right
+                                                                      (Prelude.Right
+                                                                      (Prelude.Right
+                                                                      (Prelude.Right
+                                                                      (Prelude.Right
+                                                                      (Prelude.Right
+                                                                      (Prelude.Right
+                                                                      (Prelude.Right
+                                                                      (Prelude.Right
+                                                                      (Prelude.Right
+                                                                      (Prelude.Right
+                                                                      (Prelude.Right
+                                                                      (Prelude.Right
+                                                                      (Prelude.Right
+                                                                      (Prelude.Right
+                                                                      (Prelude.Right
+                                                                      (Prelude.Right
+                                                                      (Prelude.Right
+                                                                      (Prelude.Right
+                                                                      (Prelude.Right
+                                                                      (Prelude.Right
+                                                                      (Prelude.Right
+                                                                      (Prelude.Right
+                                                                      (Prelude.Right
+                                                                      (Prelude.Right
+                                                                      (Prelude.Right
+                                                                      (Prelude.Right
+                                                                      (inhabitant
+                                                                        unit_inhabitant)))))))))))))))))))))))))))))))))
+                                                                      GHC.Base.Nothing)))
+                                                                    (\u _ _ ->
+                                                                    Prelude.Right
+                                                                    u)))))))))))))))))))))))))))))))))
     (\fuel certs priv ->
     unsafeCoerce (Prelude.Left ((,) ((,) ((,) () fuel) certs) priv))))
 
@@ -4892,6 +3819,9 @@ doHandshake_step :: Any -> Rets_tls -> Prelude.Either
                     ((,) Any (GHC.Base.Maybe (SigT () Args_tls))) ()
 doHandshake_step x x0 =
   projT1 (projT2 doHandshake_derive) x __ x0
+
+decodeHeader' :: ByteString -> Prelude.Either I.AlertDescription I.Header
+decodeHeader' = \bs  -> case I.decodeHeader bs of { Prelude.Right a -> Prelude.Right a ; Prelude.Left (T.Error_Protocol (_,_,al)) -> Prelude.Left al }
 
 maxCiphertextSize :: GHC.Base.Int
 maxCiphertextSize = 16384
@@ -4966,9 +3896,20 @@ readWrite_derive =
                            case bsplit ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
                                   ((Prelude.+) 1 ((Prelude.+) 1 0))))) b1 of {
                             (,) a5 b4 ->
-                             case decodeHeader a5 of {
-                              GHC.Base.Just a6 ->
-                               case ltb maxCiphertextSize (hdReadLen a6) of {
+                             case decodeHeader' a5 of {
+                              Prelude.Left a6 ->
+                               (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
+                                 (\_ -> Prelude.Right (Prelude.Right (Prelude.Right
+                                 (Prelude.Right (Prelude.Right (Prelude.Right
+                                 (Prelude.Right (Prelude.Right (Prelude.Right
+                                 GHC.Base.Nothing)))))))))
+                                 (\n0' -> Prelude.Right (Prelude.Left ((,) ((,) ()
+                                 n0') ((,) ((,) ((,) ((,) ((,) a3 b3)
+                                 GHC.Base.Nothing) b4) (RetAlert ((,)
+                                 I.AlertLevel_Fatal a6))) b))))
+                                 n;
+                              Prelude.Right b5 ->
+                               case ltb maxCiphertextSize (hdReadLen b5) of {
                                 GHC.Base.True ->
                                  (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
                                    (\_ -> Prelude.Right (Prelude.Right
@@ -4981,20 +3922,20 @@ readWrite_derive =
                                    I.AlertLevel_Fatal I.RecordOverflow))) b))))
                                    n;
                                 GHC.Base.False ->
-                                 case ltb (blength b4) (hdReadLen a6) of {
+                                 case ltb (blength b4) (hdReadLen b5) of {
                                   GHC.Base.True -> Prelude.Right (Prelude.Right
                                    (Prelude.Right (Prelude.Right (Prelude.Left ((,)
                                    ((,) ((,) ((,) ((,) ((,) ((,) () n) b) b0) b1)
                                    a3) b3) a4)))));
                                   GHC.Base.False ->
-                                   case bsplit (hdReadLen a6) b4 of {
-                                    (,) a7 b5 ->
-                                     case decodeRecord a6 a3 a7 of {
-                                      Prelude.Left a8 ->
+                                   case bsplit (hdReadLen b5) b4 of {
+                                    (,) a6 b6 ->
+                                     case decodeRecord b5 a3 a6 of {
+                                      Prelude.Left a7 ->
                                        case a3 of {
-                                        GHC.Base.Just a9 ->
-                                         case a9 of {
-                                          (,) a10 b6 ->
+                                        GHC.Base.Just a8 ->
+                                         case a8 of {
+                                          (,) a9 b7 ->
                                            (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
                                              (\_ -> Prelude.Right (Prelude.Right
                                              (Prelude.Right (Prelude.Right
@@ -5004,9 +3945,9 @@ readWrite_derive =
                                              GHC.Base.Nothing)))))))))
                                              (\n0' -> Prelude.Right (Prelude.Left
                                              ((,) ((,) () n0') ((,) ((,) ((,) ((,)
-                                             ((,) (GHC.Base.Just ((,) a10
-                                             ((Prelude.+) 1 b6))) b3)
-                                             GHC.Base.Nothing) b5) (RetAlert a8))
+                                             ((,) (GHC.Base.Just ((,) a9
+                                             ((Prelude.+) 1 b7))) b3)
+                                             GHC.Base.Nothing) b6) (RetAlert a7))
                                              b))))
                                              n};
                                         GHC.Base.Nothing ->
@@ -5020,97 +3961,35 @@ readWrite_derive =
                                            (\n0' -> Prelude.Right (Prelude.Left ((,)
                                            ((,) () n0') ((,) ((,) ((,) ((,) ((,)
                                            GHC.Base.Nothing b3) GHC.Base.Nothing)
-                                           b5) (RetAlert a8)) b))))
+                                           b6) (RetAlert a7)) b))))
                                            n};
-                                      Prelude.Right b6 ->
-                                       case a4 of {
-                                        Prelude.Left a8 ->
-                                         case a8 of {
-                                          Prelude.Left a9 ->
-                                           case a9 of {
-                                            Prelude.Left _ ->
-                                             case appData b6 of {
-                                              GHC.Base.Just a10 ->
-                                               case a3 of {
-                                                GHC.Base.Just a11 ->
-                                                 case a11 of {
-                                                  (,) a12 b7 ->
-                                                   (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
-                                                     (\_ -> Prelude.Right
-                                                     (Prelude.Right (Prelude.Right
-                                                     (Prelude.Right (Prelude.Right
-                                                     (Prelude.Right (Prelude.Right
-                                                     (Prelude.Right (Prelude.Right
-                                                     GHC.Base.Nothing)))))))))
-                                                     (\n0' -> Prelude.Right
-                                                     (Prelude.Left ((,) ((,) () n0')
-                                                     ((,) ((,) ((,) ((,) ((,)
-                                                     (GHC.Base.Just ((,) a12
-                                                     ((Prelude.+) 1 b7))) b3)
-                                                     GHC.Base.Nothing) b5)
-                                                     (FromRecvAppData a10)) b))))
-                                                     n};
-                                                GHC.Base.Nothing ->
-                                                 (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
-                                                   (\_ -> Prelude.Right
-                                                   (Prelude.Right (Prelude.Right
-                                                   (Prelude.Right (Prelude.Right
-                                                   (Prelude.Right (Prelude.Right
-                                                   (Prelude.Right (Prelude.Right
-                                                   GHC.Base.Nothing)))))))))
-                                                   (\n0' -> Prelude.Right
-                                                   (Prelude.Left ((,) ((,) () n0')
-                                                   ((,) ((,) ((,) ((,) ((,)
-                                                   GHC.Base.Nothing b3)
-                                                   GHC.Base.Nothing) b5)
-                                                   (FromRecvAppData a10)) b))))
-                                                   n};
-                                              GHC.Base.Nothing ->
-                                               case a3 of {
-                                                GHC.Base.Just a10 ->
-                                                 case a10 of {
-                                                  (,) a11 b7 ->
-                                                   (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
-                                                     (\_ -> Prelude.Right
-                                                     (Prelude.Right (Prelude.Right
-                                                     (Prelude.Right (Prelude.Right
-                                                     (Prelude.Right (Prelude.Right
-                                                     (Prelude.Right (Prelude.Right
-                                                     GHC.Base.Nothing)))))))))
-                                                     (\n0' -> Prelude.Right
-                                                     (Prelude.Left ((,) ((,) () n0')
-                                                     ((,) ((,) ((,) ((,) ((,)
-                                                     (GHC.Base.Just ((,) a11
-                                                     ((Prelude.+) 1 b7))) b3)
-                                                     GHC.Base.Nothing) b5) (RetAlert
-                                                     ((,) I.AlertLevel_Fatal
-                                                     I.UnexpectedMessage))) b))))
-                                                     n};
-                                                GHC.Base.Nothing ->
-                                                 (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
-                                                   (\_ -> Prelude.Right
-                                                   (Prelude.Right (Prelude.Right
-                                                   (Prelude.Right (Prelude.Right
-                                                   (Prelude.Right (Prelude.Right
-                                                   (Prelude.Right (Prelude.Right
-                                                   GHC.Base.Nothing)))))))))
-                                                   (\n0' -> Prelude.Right
-                                                   (Prelude.Left ((,) ((,) () n0')
-                                                   ((,) ((,) ((,) ((,) ((,)
-                                                   GHC.Base.Nothing b3)
-                                                   GHC.Base.Nothing) b5) (RetAlert
-                                                   ((,) I.AlertLevel_Fatal
-                                                   I.UnexpectedMessage))) b))))
-                                                   n}};
-                                            Prelude.Right _ ->
-                                             case handshake b6 of {
-                                              GHC.Base.Just a10 ->
-                                               case finished a10 of {
-                                                GHC.Base.Just a11 ->
+                                      Prelude.Right b7 ->
+                                       case changeCipherSpec b7 of {
+                                        GHC.Base.Just _ ->
+                                         (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
+                                           (\_ -> Prelude.Right (Prelude.Right
+                                           (Prelude.Right (Prelude.Right
+                                           (Prelude.Right (Prelude.Right
+                                           (Prelude.Right (Prelude.Right
+                                           (Prelude.Right
+                                           GHC.Base.Nothing)))))))))
+                                           (\n0' -> Prelude.Right (Prelude.Left ((,)
+                                           ((,) () n0') ((,) ((,) ((,) ((,) ((,) a3
+                                           b3) (GHC.Base.Just a4)) b6) b0) b))))
+                                           n;
+                                        GHC.Base.Nothing ->
+                                         case a4 of {
+                                          Prelude.Left a7 ->
+                                           case a7 of {
+                                            Prelude.Left a8 ->
+                                             case a8 of {
+                                              Prelude.Left _ ->
+                                               case appData b7 of {
+                                                GHC.Base.Just a9 ->
                                                  case a3 of {
-                                                  GHC.Base.Just a12 ->
-                                                   case a12 of {
-                                                    (,) a13 b7 ->
+                                                  GHC.Base.Just a10 ->
+                                                   case a10 of {
+                                                    (,) a11 b8 ->
                                                      (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
                                                        (\_ -> Prelude.Right
                                                        (Prelude.Right (Prelude.Right
@@ -5121,11 +4000,10 @@ readWrite_derive =
                                                        (\n0' -> Prelude.Right
                                                        (Prelude.Left ((,) ((,) ()
                                                        n0') ((,) ((,) ((,) ((,) ((,)
-                                                       (GHC.Base.Just ((,) a13
-                                                       ((Prelude.+) 1 b7))) b3)
-                                                       GHC.Base.Nothing) b5)
-                                                       (FromRecvFinished a11))
-                                                       b))))
+                                                       (GHC.Base.Just ((,) a11
+                                                       ((Prelude.+) 1 b8))) b3)
+                                                       GHC.Base.Nothing) b6)
+                                                       (FromRecvAppData a9)) b))))
                                                        n};
                                                   GHC.Base.Nothing ->
                                                    (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
@@ -5139,14 +4017,14 @@ readWrite_derive =
                                                      (Prelude.Left ((,) ((,) () n0')
                                                      ((,) ((,) ((,) ((,) ((,)
                                                      GHC.Base.Nothing b3)
-                                                     GHC.Base.Nothing) b5)
-                                                     (FromRecvFinished a11)) b))))
+                                                     GHC.Base.Nothing) b6)
+                                                     (FromRecvAppData a9)) b))))
                                                      n};
                                                 GHC.Base.Nothing ->
                                                  case a3 of {
-                                                  GHC.Base.Just a11 ->
-                                                   case a11 of {
-                                                    (,) a12 b7 ->
+                                                  GHC.Base.Just a9 ->
+                                                   case a9 of {
+                                                    (,) a10 b8 ->
                                                      (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
                                                        (\_ -> Prelude.Right
                                                        (Prelude.Right (Prelude.Right
@@ -5157,9 +4035,9 @@ readWrite_derive =
                                                        (\n0' -> Prelude.Right
                                                        (Prelude.Left ((,) ((,) ()
                                                        n0') ((,) ((,) ((,) ((,) ((,)
-                                                       (GHC.Base.Just ((,) a12
-                                                       ((Prelude.+) 1 b7))) b3)
-                                                       GHC.Base.Nothing) b5)
+                                                       (GHC.Base.Just ((,) a10
+                                                       ((Prelude.+) 1 b8))) b3)
+                                                       GHC.Base.Nothing) b6)
                                                        (RetAlert ((,)
                                                        I.AlertLevel_Fatal
                                                        I.UnexpectedMessage))) b))))
@@ -5176,15 +4054,122 @@ readWrite_derive =
                                                      (Prelude.Left ((,) ((,) () n0')
                                                      ((,) ((,) ((,) ((,) ((,)
                                                      GHC.Base.Nothing b3)
-                                                     GHC.Base.Nothing) b5) (RetAlert
+                                                     GHC.Base.Nothing) b6) (RetAlert
                                                      ((,) I.AlertLevel_Fatal
                                                      I.UnexpectedMessage))) b))))
                                                      n}};
-                                              GHC.Base.Nothing ->
-                                               case a3 of {
-                                                GHC.Base.Just a10 ->
-                                                 case a10 of {
-                                                  (,) a11 b7 ->
+                                              Prelude.Right _ ->
+                                               case handshake b7 of {
+                                                GHC.Base.Just a9 ->
+                                                 case finished a9 of {
+                                                  GHC.Base.Just a10 ->
+                                                   case a3 of {
+                                                    GHC.Base.Just a11 ->
+                                                     case a11 of {
+                                                      (,) a12 b8 ->
+                                                       (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
+                                                         (\_ -> Prelude.Right
+                                                         (Prelude.Right
+                                                         (Prelude.Right
+                                                         (Prelude.Right
+                                                         (Prelude.Right
+                                                         (Prelude.Right
+                                                         (Prelude.Right
+                                                         (Prelude.Right
+                                                         (Prelude.Right
+                                                         GHC.Base.Nothing)))))))))
+                                                         (\n0' -> Prelude.Right
+                                                         (Prelude.Left ((,) ((,) ()
+                                                         n0') ((,) ((,) ((,) ((,)
+                                                         ((,) (GHC.Base.Just ((,)
+                                                         a12 ((Prelude.+) 1 b8)))
+                                                         b3) GHC.Base.Nothing) b6)
+                                                         (FromRecvFinished a10))
+                                                         b))))
+                                                         n};
+                                                    GHC.Base.Nothing ->
+                                                     (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
+                                                       (\_ -> Prelude.Right
+                                                       (Prelude.Right (Prelude.Right
+                                                       (Prelude.Right (Prelude.Right
+                                                       (Prelude.Right (Prelude.Right
+                                                       (Prelude.Right (Prelude.Right
+                                                       GHC.Base.Nothing)))))))))
+                                                       (\n0' -> Prelude.Right
+                                                       (Prelude.Left ((,) ((,) ()
+                                                       n0') ((,) ((,) ((,) ((,) ((,)
+                                                       GHC.Base.Nothing b3)
+                                                       GHC.Base.Nothing) b6)
+                                                       (FromRecvFinished a10))
+                                                       b))))
+                                                       n};
+                                                  GHC.Base.Nothing ->
+                                                   case a3 of {
+                                                    GHC.Base.Just a10 ->
+                                                     case a10 of {
+                                                      (,) a11 b8 ->
+                                                       (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
+                                                         (\_ -> Prelude.Right
+                                                         (Prelude.Right
+                                                         (Prelude.Right
+                                                         (Prelude.Right
+                                                         (Prelude.Right
+                                                         (Prelude.Right
+                                                         (Prelude.Right
+                                                         (Prelude.Right
+                                                         (Prelude.Right
+                                                         GHC.Base.Nothing)))))))))
+                                                         (\n0' -> Prelude.Right
+                                                         (Prelude.Left ((,) ((,) ()
+                                                         n0') ((,) ((,) ((,) ((,)
+                                                         ((,) (GHC.Base.Just ((,)
+                                                         a11 ((Prelude.+) 1 b8)))
+                                                         b3) GHC.Base.Nothing) b6)
+                                                         (RetAlert ((,)
+                                                         I.AlertLevel_Fatal
+                                                         I.UnexpectedMessage)))
+                                                         b))))
+                                                         n};
+                                                    GHC.Base.Nothing ->
+                                                     (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
+                                                       (\_ -> Prelude.Right
+                                                       (Prelude.Right (Prelude.Right
+                                                       (Prelude.Right (Prelude.Right
+                                                       (Prelude.Right (Prelude.Right
+                                                       (Prelude.Right (Prelude.Right
+                                                       GHC.Base.Nothing)))))))))
+                                                       (\n0' -> Prelude.Right
+                                                       (Prelude.Left ((,) ((,) ()
+                                                       n0') ((,) ((,) ((,) ((,) ((,)
+                                                       GHC.Base.Nothing b3)
+                                                       GHC.Base.Nothing) b6)
+                                                       (RetAlert ((,)
+                                                       I.AlertLevel_Fatal
+                                                       I.UnexpectedMessage))) b))))
+                                                       n}};
+                                                GHC.Base.Nothing ->
+                                                 case a3 of {
+                                                  GHC.Base.Just a9 ->
+                                                   case a9 of {
+                                                    (,) a10 b8 ->
+                                                     (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
+                                                       (\_ -> Prelude.Right
+                                                       (Prelude.Right (Prelude.Right
+                                                       (Prelude.Right (Prelude.Right
+                                                       (Prelude.Right (Prelude.Right
+                                                       (Prelude.Right (Prelude.Right
+                                                       GHC.Base.Nothing)))))))))
+                                                       (\n0' -> Prelude.Right
+                                                       (Prelude.Left ((,) ((,) ()
+                                                       n0') ((,) ((,) ((,) ((,) ((,)
+                                                       (GHC.Base.Just ((,) a10
+                                                       ((Prelude.+) 1 b8))) b3)
+                                                       GHC.Base.Nothing) b6)
+                                                       (RetAlert ((,)
+                                                       I.AlertLevel_Fatal
+                                                       I.UnexpectedMessage))) b))))
+                                                       n};
+                                                  GHC.Base.Nothing ->
                                                    (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
                                                      (\_ -> Prelude.Right
                                                      (Prelude.Right (Prelude.Right
@@ -5195,9 +4180,66 @@ readWrite_derive =
                                                      (\n0' -> Prelude.Right
                                                      (Prelude.Left ((,) ((,) () n0')
                                                      ((,) ((,) ((,) ((,) ((,)
-                                                     (GHC.Base.Just ((,) a11
-                                                     ((Prelude.+) 1 b7))) b3)
-                                                     GHC.Base.Nothing) b5) (RetAlert
+                                                     GHC.Base.Nothing b3)
+                                                     GHC.Base.Nothing) b6) (RetAlert
+                                                     ((,) I.AlertLevel_Fatal
+                                                     I.UnexpectedMessage))) b))))
+                                                     n}}};
+                                            Prelude.Right _ ->
+                                             case changeCipherSpec b7 of {
+                                              GHC.Base.Just _ ->
+                                               case a3 of {
+                                                GHC.Base.Just a8 ->
+                                                 case a8 of {
+                                                  (,) a9 b8 ->
+                                                   (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
+                                                     (\_ -> Prelude.Right
+                                                     (Prelude.Right (Prelude.Right
+                                                     (Prelude.Right (Prelude.Right
+                                                     (Prelude.Right (Prelude.Right
+                                                     (Prelude.Right (Prelude.Right
+                                                     GHC.Base.Nothing)))))))))
+                                                     (\n0' -> Prelude.Right
+                                                     (Prelude.Left ((,) ((,) () n0')
+                                                     ((,) ((,) ((,) ((,) ((,)
+                                                     (GHC.Base.Just ((,) a9
+                                                     ((Prelude.+) 1 b8))) b3)
+                                                     GHC.Base.Nothing) b6)
+                                                     FromRecvCCS) b))))
+                                                     n};
+                                                GHC.Base.Nothing ->
+                                                 (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
+                                                   (\_ -> Prelude.Right
+                                                   (Prelude.Right (Prelude.Right
+                                                   (Prelude.Right (Prelude.Right
+                                                   (Prelude.Right (Prelude.Right
+                                                   (Prelude.Right (Prelude.Right
+                                                   GHC.Base.Nothing)))))))))
+                                                   (\n0' -> Prelude.Right
+                                                   (Prelude.Left ((,) ((,) () n0')
+                                                   ((,) ((,) ((,) ((,) ((,)
+                                                   GHC.Base.Nothing b3)
+                                                   GHC.Base.Nothing) b6)
+                                                   FromRecvCCS) b))))
+                                                   n};
+                                              GHC.Base.Nothing ->
+                                               case a3 of {
+                                                GHC.Base.Just a8 ->
+                                                 case a8 of {
+                                                  (,) a9 b8 ->
+                                                   (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
+                                                     (\_ -> Prelude.Right
+                                                     (Prelude.Right (Prelude.Right
+                                                     (Prelude.Right (Prelude.Right
+                                                     (Prelude.Right (Prelude.Right
+                                                     (Prelude.Right (Prelude.Right
+                                                     GHC.Base.Nothing)))))))))
+                                                     (\n0' -> Prelude.Right
+                                                     (Prelude.Left ((,) ((,) () n0')
+                                                     ((,) ((,) ((,) ((,) ((,)
+                                                     (GHC.Base.Just ((,) a9
+                                                     ((Prelude.+) 1 b8))) b3)
+                                                     GHC.Base.Nothing) b6) (RetAlert
                                                      ((,) I.AlertLevel_Fatal
                                                      I.UnexpectedMessage))) b))))
                                                      n};
@@ -5213,17 +4255,17 @@ readWrite_derive =
                                                    (Prelude.Left ((,) ((,) () n0')
                                                    ((,) ((,) ((,) ((,) ((,)
                                                    GHC.Base.Nothing b3)
-                                                   GHC.Base.Nothing) b5) (RetAlert
+                                                   GHC.Base.Nothing) b6) (RetAlert
                                                    ((,) I.AlertLevel_Fatal
                                                    I.UnexpectedMessage))) b))))
                                                    n}}};
                                           Prelude.Right _ ->
-                                           case changeCipherSpec b6 of {
-                                            GHC.Base.Just _ ->
+                                           case clientHello b7 of {
+                                            GHC.Base.Just a7 ->
                                              case a3 of {
-                                              GHC.Base.Just a9 ->
-                                               case a9 of {
-                                                (,) a10 b7 ->
+                                              GHC.Base.Just a8 ->
+                                               case a8 of {
+                                                (,) a9 b8 ->
                                                  (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
                                                    (\_ -> Prelude.Right
                                                    (Prelude.Right (Prelude.Right
@@ -5234,10 +4276,11 @@ readWrite_derive =
                                                    (\n0' -> Prelude.Right
                                                    (Prelude.Left ((,) ((,) () n0')
                                                    ((,) ((,) ((,) ((,) ((,)
-                                                   (GHC.Base.Just ((,) a10
-                                                   ((Prelude.+) 1 b7))) b3)
-                                                   GHC.Base.Nothing) b5)
-                                                   FromRecvCCS) b))))
+                                                   (GHC.Base.Just ((,) a9
+                                                   ((Prelude.+) 1 b8))) b3)
+                                                   GHC.Base.Nothing) b6)
+                                                   (FromRecvClientHello ((,) a6
+                                                   a7))) b))))
                                                    n};
                                               GHC.Base.Nothing ->
                                                (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
@@ -5251,14 +4294,15 @@ readWrite_derive =
                                                  (Prelude.Left ((,) ((,) () n0')
                                                  ((,) ((,) ((,) ((,) ((,)
                                                  GHC.Base.Nothing b3)
-                                                 GHC.Base.Nothing) b5) FromRecvCCS)
+                                                 GHC.Base.Nothing) b6)
+                                                 (FromRecvClientHello ((,) a6 a7)))
                                                  b))))
                                                  n};
                                             GHC.Base.Nothing ->
                                              case a3 of {
-                                              GHC.Base.Just a9 ->
-                                               case a9 of {
-                                                (,) a10 b7 ->
+                                              GHC.Base.Just a7 ->
+                                               case a7 of {
+                                                (,) a8 b8 ->
                                                  (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
                                                    (\_ -> Prelude.Right
                                                    (Prelude.Right (Prelude.Right
@@ -5269,9 +4313,9 @@ readWrite_derive =
                                                    (\n0' -> Prelude.Right
                                                    (Prelude.Left ((,) ((,) () n0')
                                                    ((,) ((,) ((,) ((,) ((,)
-                                                   (GHC.Base.Just ((,) a10
-                                                   ((Prelude.+) 1 b7))) b3)
-                                                   GHC.Base.Nothing) b5) (RetAlert
+                                                   (GHC.Base.Just ((,) a8
+                                                   ((Prelude.+) 1 b8))) b3)
+                                                   GHC.Base.Nothing) b6) (RetAlert
                                                    ((,) I.AlertLevel_Fatal
                                                    I.UnexpectedMessage))) b))))
                                                    n};
@@ -5287,95 +4331,10 @@ readWrite_derive =
                                                  (Prelude.Left ((,) ((,) () n0')
                                                  ((,) ((,) ((,) ((,) ((,)
                                                  GHC.Base.Nothing b3)
-                                                 GHC.Base.Nothing) b5) (RetAlert
+                                                 GHC.Base.Nothing) b6) (RetAlert
                                                  ((,) I.AlertLevel_Fatal
                                                  I.UnexpectedMessage))) b))))
-                                                 n}}};
-                                        Prelude.Right _ ->
-                                         case clientHello b6 of {
-                                          GHC.Base.Just a8 ->
-                                           case a3 of {
-                                            GHC.Base.Just a9 ->
-                                             case a9 of {
-                                              (,) a10 b7 ->
-                                               (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
-                                                 (\_ -> Prelude.Right (Prelude.Right
-                                                 (Prelude.Right (Prelude.Right
-                                                 (Prelude.Right (Prelude.Right
-                                                 (Prelude.Right (Prelude.Right
-                                                 (Prelude.Right
-                                                 GHC.Base.Nothing)))))))))
-                                                 (\n0' -> Prelude.Right
-                                                 (Prelude.Left ((,) ((,) () n0')
-                                                 ((,) ((,) ((,) ((,) ((,)
-                                                 (GHC.Base.Just ((,) a10
-                                                 ((Prelude.+) 1 b7))) b3)
-                                                 GHC.Base.Nothing) b5)
-                                                 (FromRecvClientHello ((,) a7 a8)))
-                                                 b))))
-                                                 n};
-                                            GHC.Base.Nothing ->
-                                             (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
-                                               (\_ -> Prelude.Right (Prelude.Right
-                                               (Prelude.Right (Prelude.Right
-                                               (Prelude.Right (Prelude.Right
-                                               (Prelude.Right (Prelude.Right
-                                               (Prelude.Right
-                                               GHC.Base.Nothing)))))))))
-                                               (\n0' -> Prelude.Right (Prelude.Left
-                                               ((,) ((,) () n0') ((,) ((,) ((,) ((,)
-                                               ((,) GHC.Base.Nothing b3)
-                                               GHC.Base.Nothing) b5)
-                                               (FromRecvClientHello ((,) a7 a8)))
-                                               b))))
-                                               n};
-                                          GHC.Base.Nothing ->
-                                           case a3 of {
-                                            GHC.Base.Just a8 ->
-                                             case a8 of {
-                                              (,) a9 b7 ->
-                                               (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
-                                                 (\_ -> Prelude.Right (Prelude.Right
-                                                 (Prelude.Right (Prelude.Right
-                                                 (Prelude.Right (Prelude.Right
-                                                 (Prelude.Right (Prelude.Right
-                                                 (Prelude.Right
-                                                 GHC.Base.Nothing)))))))))
-                                                 (\n0' -> Prelude.Right
-                                                 (Prelude.Left ((,) ((,) () n0')
-                                                 ((,) ((,) ((,) ((,) ((,)
-                                                 (GHC.Base.Just ((,) a9
-                                                 ((Prelude.+) 1 b7))) b3)
-                                                 GHC.Base.Nothing) b5) (RetAlert
-                                                 ((,) I.AlertLevel_Fatal
-                                                 I.UnexpectedMessage))) b))))
-                                                 n};
-                                            GHC.Base.Nothing ->
-                                             (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
-                                               (\_ -> Prelude.Right (Prelude.Right
-                                               (Prelude.Right (Prelude.Right
-                                               (Prelude.Right (Prelude.Right
-                                               (Prelude.Right (Prelude.Right
-                                               (Prelude.Right
-                                               GHC.Base.Nothing)))))))))
-                                               (\n0' -> Prelude.Right (Prelude.Left
-                                               ((,) ((,) () n0') ((,) ((,) ((,) ((,)
-                                               ((,) GHC.Base.Nothing b3)
-                                               GHC.Base.Nothing) b5) (RetAlert ((,)
-                                               I.AlertLevel_Fatal
-                                               I.UnexpectedMessage))) b))))
-                                               n}}}}}}};
-                              GHC.Base.Nothing ->
-                               (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
-                                 (\_ -> Prelude.Right (Prelude.Right (Prelude.Right
-                                 (Prelude.Right (Prelude.Right (Prelude.Right
-                                 (Prelude.Right (Prelude.Right (Prelude.Right
-                                 GHC.Base.Nothing)))))))))
-                                 (\n0' -> Prelude.Right (Prelude.Left ((,) ((,) ()
-                                 n0') ((,) ((,) ((,) ((,) ((,) a3 b3)
-                                 GHC.Base.Nothing) b4) (RetAlert ((,)
-                                 I.AlertLevel_Fatal I.DecodeError))) b))))
-                                 n}}};
+                                                 n}}}}}}}}}}};
                         GHC.Base.Nothing ->
                          case doHandshake_step b b0 of {
                           Prelude.Left p0 ->
@@ -5430,7 +4389,8 @@ readWrite_derive =
                                              (\n0' -> Prelude.Right (Prelude.Left
                                              ((,) ((,) () n0') ((,) ((,) ((,) ((,)
                                              ((,) (GHC.Base.Just ((,) a5 0)) b3)
-                                             GHC.Base.Nothing) b1) FromSetSecret) s))))
+                                             GHC.Base.Nothing) b1) FromSetSecret)
+                                             s))))
                                              n;
                                           GHC.Base.False ->
                                            (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
@@ -5443,7 +4403,8 @@ readWrite_derive =
                                              (\n0' -> Prelude.Right (Prelude.Left
                                              ((,) ((,) () n0') ((,) ((,) ((,) ((,)
                                              ((,) a3 (GHC.Base.Just ((,) a5 0)))
-                                             GHC.Base.Nothing) b1) FromSetSecret) s))))
+                                             GHC.Base.Nothing) b1) FromSetSecret)
+                                             s))))
                                              n}};
                                       GHC.Base.Nothing -> Prelude.Right
                                        (Prelude.Right (Prelude.Right (Prelude.Right
@@ -5478,9 +4439,15 @@ readWrite_derive =
                            case bsplit ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
                                   ((Prelude.+) 1 ((Prelude.+) 1 0))))) b1 of {
                             (,) a3 b4 ->
-                             case decodeHeader a3 of {
-                              GHC.Base.Just a4 ->
-                               case ltb maxCiphertextSize (hdReadLen a4) of {
+                             case decodeHeader' a3 of {
+                              Prelude.Left _ ->
+                               (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
+                                 (\_ -> GHC.Base.Nothing)
+                                 (\_ -> GHC.Base.Just (ExistT __ (GetRandomBytes
+                                 0)))
+                                 n;
+                              Prelude.Right b5 ->
+                               case ltb maxCiphertextSize (hdReadLen b5) of {
                                 GHC.Base.True ->
                                  (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
                                    (\_ -> GHC.Base.Nothing)
@@ -5488,7 +4455,7 @@ readWrite_derive =
                                    0)))
                                    n;
                                 GHC.Base.False ->
-                                 case ltb (blength b4) (hdReadLen a4) of {
+                                 case ltb (blength b4) (hdReadLen b5) of {
                                   GHC.Base.True -> GHC.Base.Just (ExistT __
                                    (RecvData ()));
                                   GHC.Base.False ->
@@ -5496,13 +4463,7 @@ readWrite_derive =
                                      (\_ -> GHC.Base.Nothing)
                                      (\_ -> GHC.Base.Just (ExistT __ (GetRandomBytes
                                      0)))
-                                     n}};
-                              GHC.Base.Nothing ->
-                               (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
-                                 (\_ -> GHC.Base.Nothing)
-                                 (\_ -> GHC.Base.Just (ExistT __ (GetRandomBytes
-                                 0)))
-                                 n}}};
+                                     n}}}}};
                         GHC.Base.Nothing ->
                          case doHandshake_step b b0 of {
                           Prelude.Left p0 ->
@@ -5702,9 +4663,10 @@ readWrite_derive =
     unsafeCoerce (Prelude.Left ((,) ((,) ((,) () fuel) certs) priv))))
 
 data Eff_conn =
-   NewAccept
+   Accept
  | Perform
  | Receive
+ | Skip
 
 type Args_conn = Any
 
@@ -5763,10 +4725,9 @@ lift_conn :: Eff_conn -> (Rets_conn -> Prelude.Either a1 (GHC.Base.Maybe a2)) ->
              Eff_conn -> Rets_conn -> Prelude.Either a1 (GHC.Base.Maybe a2)
 lift_conn e a e0 =
   case e of {
-   NewAccept ->
-    case e0 of {
-     NewAccept -> a;
-     _ -> (\_ -> Prelude.Right GHC.Base.Nothing)};
+   Accept -> case e0 of {
+              Accept -> a;
+              _ -> (\_ -> Prelude.Right GHC.Base.Nothing)};
    Perform ->
     case e0 of {
      Perform -> a;
@@ -5774,62 +4735,22 @@ lift_conn e a e0 =
    Receive ->
     case e0 of {
      Receive -> a;
-     _ -> (\_ -> Prelude.Right GHC.Base.Nothing)}}
+     _ -> (\_ -> Prelude.Right GHC.Base.Nothing)};
+   Skip -> case e0 of {
+            Skip -> a;
+            _ -> (\_ -> Prelude.Right GHC.Base.Nothing)}}
 
 main_loop_step :: (Prelude.Either
                   ((,)
-                  ((,) ((,) ((,) () GHC.Base.Int) GHC.Base.Int) CertificateChain)
-                  PrivateKey)
+                  ((,) ((,) ((,) ((,) () GHC.Base.Int) GHC.Base.Int) GHC.Base.Int)
+                  CertificateChain) PrivateKey)
                   (Prelude.Either
                   ((,)
                   ((,)
                   ((,)
-                  ((,) ((,) ((,) ((,) () GHC.Base.Int) CertificateChain) PrivateKey)
-                  GHC.Base.Int) (Map Any))
-                  (GHC.Base.Maybe ((,) Prelude.String Rets_tls)))
-                  (Map I.SessionData))
-                  (Prelude.Either
-                  ((,)
-                  ((,)
-                  ((,)
-                  ((,)
-                  ((,)
-                  ((,)
-                  ((,) ((,) ((,) ((,) () GHC.Base.Int) CertificateChain) PrivateKey)
-                  GHC.Base.Int) (Map Any))
-                  (GHC.Base.Maybe ((,) Prelude.String Rets_tls)))
-                  (Map I.SessionData)) Prelude.String) Any) Args_tls)
-                  (Prelude.Either
-                  ((,)
-                  ((,)
-                  ((,)
-                  ((,) ((,) ((,) ((,) () GHC.Base.Int) CertificateChain) PrivateKey)
-                  GHC.Base.Int) (Map Any))
-                  (GHC.Base.Maybe ((,) Prelude.String Rets_tls)))
-                  (Map I.SessionData))
-                  (Prelude.Either
-                  ((,)
-                  ((,)
-                  ((,)
-                  ((,)
-                  ((,)
-                  ((,) ((,) ((,) ((,) () GHC.Base.Int) CertificateChain) PrivateKey)
-                  GHC.Base.Int) (Map Any)) (Map I.SessionData)) Prelude.String) 
-                  Any) Args_tls) (GHC.Base.Maybe ())))))) -> Eff_conn -> Rets_conn
-                  -> Prelude.Either
-                  ((,)
-                  (Prelude.Either
                   ((,)
                   ((,) ((,) ((,) () GHC.Base.Int) GHC.Base.Int) CertificateChain)
-                  PrivateKey)
-                  (Prelude.Either
-                  ((,)
-                  ((,)
-                  ((,)
-                  ((,) ((,) ((,) ((,) () GHC.Base.Int) CertificateChain) PrivateKey)
-                  GHC.Base.Int) (Map Any))
-                  (GHC.Base.Maybe ((,) Prelude.String Rets_tls)))
-                  (Map I.SessionData))
+                  PrivateKey) GHC.Base.Int) (Map I.SessionData)) (Map Any))
                   (Prelude.Either
                   ((,)
                   ((,)
@@ -5837,44 +4758,112 @@ main_loop_step :: (Prelude.Either
                   ((,)
                   ((,)
                   ((,)
-                  ((,) ((,) ((,) ((,) () GHC.Base.Int) CertificateChain) PrivateKey)
-                  GHC.Base.Int) (Map Any))
-                  (GHC.Base.Maybe ((,) Prelude.String Rets_tls)))
-                  (Map I.SessionData)) Prelude.String) Any) Args_tls)
-                  (Prelude.Either
                   ((,)
-                  ((,)
-                  ((,)
-                  ((,) ((,) ((,) ((,) () GHC.Base.Int) CertificateChain) PrivateKey)
-                  GHC.Base.Int) (Map Any))
-                  (GHC.Base.Maybe ((,) Prelude.String Rets_tls)))
-                  (Map I.SessionData))
+                  ((,) ((,) ((,) () GHC.Base.Int) GHC.Base.Int) CertificateChain)
+                  PrivateKey) GHC.Base.Int) (Map I.SessionData)) (Map Any))
+                  Prelude.String) Any) Args_tls)
                   (Prelude.Either
                   ((,)
                   ((,)
                   ((,)
                   ((,)
+                  ((,) ((,) ((,) () GHC.Base.Int) GHC.Base.Int) CertificateChain)
+                  PrivateKey) GHC.Base.Int) (Map I.SessionData)) (Map Any))
+                  (Prelude.Either
                   ((,)
-                  ((,) ((,) ((,) ((,) () GHC.Base.Int) CertificateChain) PrivateKey)
-                  GHC.Base.Int) (Map Any)) (Map I.SessionData)) Prelude.String) 
-                  Any) Args_tls) (GHC.Base.Maybe ()))))))
+                  ((,)
+                  ((,)
+                  ((,)
+                  ((,)
+                  ((,)
+                  ((,)
+                  ((,)
+                  ((,) ((,) ((,) () GHC.Base.Int) GHC.Base.Int) CertificateChain)
+                  PrivateKey) GHC.Base.Int) (Map Any)) Prelude.String) GHC.Base.Int)
+                  (Map I.SessionData)) Any) Args_tls)
+                  (Prelude.Either
+                  ((,)
+                  ((,)
+                  ((,)
+                  ((,)
+                  ((,)
+                  ((,)
+                  ((,)
+                  ((,) ((,) ((,) () GHC.Base.Int) GHC.Base.Int) CertificateChain)
+                  PrivateKey) GHC.Base.Int) (Map Any)) Prelude.String)
+                  (Map I.SessionData)) Any) Args_tls) (GHC.Base.Maybe ()))))))) ->
+                  Eff_conn -> Rets_conn -> Prelude.Either
+                  ((,)
+                  (Prelude.Either
+                  ((,)
+                  ((,) ((,) ((,) ((,) () GHC.Base.Int) GHC.Base.Int) GHC.Base.Int)
+                  CertificateChain) PrivateKey)
+                  (Prelude.Either
+                  ((,)
+                  ((,)
+                  ((,)
+                  ((,)
+                  ((,) ((,) ((,) () GHC.Base.Int) GHC.Base.Int) CertificateChain)
+                  PrivateKey) GHC.Base.Int) (Map I.SessionData)) (Map Any))
+                  (Prelude.Either
+                  ((,)
+                  ((,)
+                  ((,)
+                  ((,)
+                  ((,)
+                  ((,)
+                  ((,)
+                  ((,) ((,) ((,) () GHC.Base.Int) GHC.Base.Int) CertificateChain)
+                  PrivateKey) GHC.Base.Int) (Map I.SessionData)) (Map Any))
+                  Prelude.String) Any) Args_tls)
+                  (Prelude.Either
+                  ((,)
+                  ((,)
+                  ((,)
+                  ((,)
+                  ((,) ((,) ((,) () GHC.Base.Int) GHC.Base.Int) CertificateChain)
+                  PrivateKey) GHC.Base.Int) (Map I.SessionData)) (Map Any))
+                  (Prelude.Either
+                  ((,)
+                  ((,)
+                  ((,)
+                  ((,)
+                  ((,)
+                  ((,)
+                  ((,)
+                  ((,)
+                  ((,) ((,) ((,) () GHC.Base.Int) GHC.Base.Int) CertificateChain)
+                  PrivateKey) GHC.Base.Int) (Map Any)) Prelude.String) GHC.Base.Int)
+                  (Map I.SessionData)) Any) Args_tls)
+                  (Prelude.Either
+                  ((,)
+                  ((,)
+                  ((,)
+                  ((,)
+                  ((,)
+                  ((,)
+                  ((,)
+                  ((,) ((,) ((,) () GHC.Base.Int) GHC.Base.Int) CertificateChain)
+                  PrivateKey) GHC.Base.Int) (Map Any)) Prelude.String)
+                  (Map I.SessionData)) Any) Args_tls) (GHC.Base.Maybe ())))))))
                   (GHC.Base.Maybe (SigT Eff_conn Args_conn))) (GHC.Base.Maybe ())
 main_loop_step =
   sum_merge
     (prod_curry
       (prod_curry
         (prod_curry
-          (prod_curry (\_ n n0 c p _ _ -> Prelude.Left ((,)
-            ((\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
-               (\_ -> Prelude.Right (Prelude.Right (Prelude.Right (Prelude.Right
-               (Prelude.Right GHC.Base.Nothing)))))
-               (\n1 -> Prelude.Right (Prelude.Left ((,) ((,) ((,) ((,) ((,) ((,)
-               ((,) () n0) c) p) n1) Leaf) GHC.Base.Nothing) Leaf)))
-               n)
-            ((\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
-               (\_ -> GHC.Base.Nothing)
-               (\_ -> GHC.Base.Just (ExistT NewAccept (unsafeCoerce ())))
-               n)))))))
+          (prod_curry
+            (prod_curry (\_ n n0 n1 c p _ _ -> Prelude.Left ((,)
+              ((\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
+                 (\_ -> Prelude.Right (Prelude.Right (Prelude.Right (Prelude.Right
+                 (Prelude.Right (Prelude.Right GHC.Base.Nothing))))))
+                 (\n2 -> Prelude.Right (Prelude.Left ((,) ((,) ((,) ((,) ((,) ((,)
+                 ((,) () n0) n1) c) p) n2) Leaf) Leaf)))
+                 n)
+              ((\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
+                 (\_ -> GHC.Base.Nothing)
+                 (\_ -> GHC.Base.Just (ExistT Accept (unsafeCoerce ())))
+                 n))))))))
     (sum_merge
       (prod_curry
         (prod_curry
@@ -5882,96 +4871,37 @@ main_loop_step =
             (prod_curry
               (prod_curry
                 (prod_curry
-                  (prod_curry (\_ n c p n0 m o m0 ->
-                    lift_conn NewAccept (\r -> Prelude.Left ((,)
+                  (prod_curry (\_ n n0 c p n1 m m0 ->
+                    lift_conn Accept (\r -> Prelude.Left ((,)
                       (case unsafeCoerce r of {
                         GHC.Base.Just a ->
                          (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
                            (\_ -> Prelude.Right (Prelude.Right (Prelude.Right
-                           (Prelude.Right (Prelude.Right GHC.Base.Nothing)))))
+                           (Prelude.Right (Prelude.Right (Prelude.Right
+                           GHC.Base.Nothing))))))
                            (\_ ->
                            let {s0 = ExistT __ (GetRandomBytes 0)} in
                            case s0 of {
                             ExistT _ v -> Prelude.Right (Prelude.Right (Prelude.Left
                              ((,) ((,) ((,) ((,) ((,) ((,) ((,) ((,) ((,) ((,) () n)
-                             c) p) n0) m) o) m0) a)
+                             n0) c) p) n1) m) m0) a)
                              ((\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
                                 (\_ ->
                                 unsafeCoerce (Prelude.Right (Prelude.Right
                                   (Prelude.Right (Prelude.Right (Prelude.Right
                                   (Prelude.Right (Prelude.Right (Prelude.Right
                                   (Prelude.Right GHC.Base.Nothing))))))))))
-                                (\n1 ->
+                                (\n2 ->
                                 unsafeCoerce (Prelude.Right (Prelude.Left ((,) ((,)
-                                  () n1) ((,) ((,) ((,) ((,) ((,) GHC.Base.Nothing
+                                  () n2) ((,) ((,) ((,) ((,) ((,) GHC.Base.Nothing
                                   GHC.Base.Nothing) GHC.Base.Nothing) empty)
                                   (inhabitant sigT_rets_inhabit)) (Prelude.Left ((,)
                                   ((,) ((,) () n) c) p)))))))
                                 n)) v)))})
                            n;
-                        GHC.Base.Nothing ->
-                         case o of {
-                          GHC.Base.Just a ->
-                           case a of {
-                            (,) a0 b ->
-                             case bsearch a0 m of {
-                              GHC.Base.Just a1 ->
-                               case readWrite_step a1 b of {
-                                Prelude.Left p0 ->
-                                 case p0 of {
-                                  (,) s o0 ->
-                                   case o0 of {
-                                    GHC.Base.Just s0 ->
-                                     case s0 of {
-                                      ExistT _ v ->
-                                       case isSetPSK v of {
-                                        GHC.Base.Just a2 ->
-                                         case a2 of {
-                                          (,) a3 b0 ->
-                                           (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
-                                             (\_ -> Prelude.Right (Prelude.Right
-                                             (Prelude.Right (Prelude.Right
-                                             (Prelude.Right
-                                             GHC.Base.Nothing)))))
-                                             (\n0' -> Prelude.Right (Prelude.Left
-                                             ((,) ((,) ((,) ((,) ((,) ((,) ((,) ()
-                                             n) c) p) n0') (replace_map a0 s m))
-                                             (GHC.Base.Just ((,) a0 FromSetPSK)))
-                                             (insert a3 b0 m0))))
-                                             n0};
-                                        GHC.Base.Nothing ->
-                                         case isSessionResume v of {
-                                          GHC.Base.Just a2 ->
-                                           case lookupAndDelete a2 m0 of {
-                                            (,) a3 b0 ->
-                                             (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
-                                               (\_ -> Prelude.Right (Prelude.Right
-                                               (Prelude.Right (Prelude.Right
-                                               (Prelude.Right
-                                               GHC.Base.Nothing)))))
-                                               (\n0' -> Prelude.Right (Prelude.Left
-                                               ((,) ((,) ((,) ((,) ((,) ((,) ((,) ()
-                                               n) c) p) n0') (replace_map a0 s m))
-                                               (GHC.Base.Just ((,) a0
-                                               (FromSessionResume a3)))) b0)))
-                                               n0};
-                                          GHC.Base.Nothing -> Prelude.Right
-                                           (Prelude.Right (Prelude.Right
-                                           (Prelude.Right (Prelude.Left ((,) ((,)
-                                           ((,) ((,) ((,) ((,) ((,) ((,) ((,) () n)
-                                           c) p) n0) m) m0) a0) s) v)))))}}};
-                                    GHC.Base.Nothing -> Prelude.Right (Prelude.Right
-                                     (Prelude.Right (Prelude.Right (Prelude.Right
-                                     GHC.Base.Nothing))))}};
-                                Prelude.Right _ -> Prelude.Right (Prelude.Right
-                                 (Prelude.Right (Prelude.Right (Prelude.Right
-                                 GHC.Base.Nothing))))};
-                              GHC.Base.Nothing -> Prelude.Right (Prelude.Right
-                               (Prelude.Right (Prelude.Right (Prelude.Right
-                               GHC.Base.Nothing))))}};
-                          GHC.Base.Nothing -> Prelude.Right (Prelude.Right
-                           (Prelude.Right (Prelude.Left ((,) ((,) ((,) ((,) ((,)
-                           ((,) ((,) () n) c) p) n0) m) o) m0))))}})
+                        GHC.Base.Nothing -> Prelude.Right (Prelude.Right
+                         (Prelude.Right (Prelude.Left ((,) ((,) ((,) ((,) ((,) ((,)
+                         ((,) () n) n0) c) p) n1) m) m0))))})
                       (case unsafeCoerce r of {
                         GHC.Base.Just a ->
                          (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
@@ -5982,43 +4912,8 @@ main_loop_step =
                             ExistT _ v -> GHC.Base.Just (ExistT Perform
                              (unsafeCoerce ((,) a v)))})
                            n;
-                        GHC.Base.Nothing ->
-                         case o of {
-                          GHC.Base.Just a ->
-                           case a of {
-                            (,) a0 b ->
-                             case bsearch a0 m of {
-                              GHC.Base.Just a1 ->
-                               case readWrite_step a1 b of {
-                                Prelude.Left p0 ->
-                                 case p0 of {
-                                  (,) _ o0 ->
-                                   case o0 of {
-                                    GHC.Base.Just s0 ->
-                                     case s0 of {
-                                      ExistT _ v ->
-                                       case isSetPSK v of {
-                                        GHC.Base.Just _ ->
-                                         (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
-                                           (\_ -> GHC.Base.Nothing)
-                                           (\_ -> GHC.Base.Just (ExistT NewAccept
-                                           (unsafeCoerce ())))
-                                           n0;
-                                        GHC.Base.Nothing ->
-                                         case isSessionResume v of {
-                                          GHC.Base.Just _ ->
-                                           (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
-                                             (\_ -> GHC.Base.Nothing)
-                                             (\_ -> GHC.Base.Just (ExistT NewAccept
-                                             (unsafeCoerce ())))
-                                             n0;
-                                          GHC.Base.Nothing -> GHC.Base.Just (ExistT
-                                           Perform (unsafeCoerce ((,) a0 v)))}}};
-                                    GHC.Base.Nothing -> GHC.Base.Nothing}};
-                                Prelude.Right _ -> GHC.Base.Nothing};
-                              GHC.Base.Nothing -> GHC.Base.Nothing}};
-                          GHC.Base.Nothing -> GHC.Base.Just (ExistT Receive
-                           (unsafeCoerce ()))}})))))))))))
+                        GHC.Base.Nothing -> GHC.Base.Just (ExistT Receive
+                         (unsafeCoerce ()))})))))))))))
       (sum_merge
         (prod_curry
           (prod_curry
@@ -6029,21 +4924,21 @@ main_loop_step =
                     (prod_curry
                       (prod_curry
                         (prod_curry
-                          (prod_curry (\_ n c p n0 m o m0 s p0 _ ->
+                          (prod_curry (\_ n n0 c p n1 m m0 s p0 _ ->
                             lift_conn Perform (\_ -> Prelude.Left ((,)
                               ((\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
                                  (\_ -> Prelude.Right (Prelude.Right (Prelude.Right
-                                 (Prelude.Right (Prelude.Right
-                                 GHC.Base.Nothing)))))
+                                 (Prelude.Right (Prelude.Right (Prelude.Right
+                                 GHC.Base.Nothing))))))
                                  (\n0' -> Prelude.Right (Prelude.Left ((,) ((,) ((,)
-                                 ((,) ((,) ((,) ((,) () n) c) p) n0')
-                                 (insert s p0 m)) o) m0)))
-                                 n0)
+                                 ((,) ((,) ((,) ((,) () n) n0) c) p) n0') m)
+                                 (insert s p0 m0))))
+                                 n1)
                               ((\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
                                  (\_ -> GHC.Base.Nothing)
-                                 (\_ -> GHC.Base.Just (ExistT NewAccept
+                                 (\_ -> GHC.Base.Just (ExistT Accept
                                  (unsafeCoerce ())))
-                                 n0))))))))))))))
+                                 n1))))))))))))))
         (sum_merge
           (prod_curry
             (prod_curry
@@ -6051,118 +4946,87 @@ main_loop_step =
                 (prod_curry
                   (prod_curry
                     (prod_curry
-                      (prod_curry (\_ n c p n0 m _ m0 ->
+                      (prod_curry (\_ n n0 c p n1 m m0 ->
                         lift_conn Receive (\r -> Prelude.Left ((,)
                           (case unsafeCoerce r of {
                             GHC.Base.Just a ->
                              case a of {
                               (,) a0 b ->
-                               case bsearch a0 m of {
+                               case bsearch a0 m0 of {
                                 GHC.Base.Just a1 ->
-                                 case readWrite_step a1 b of {
-                                  Prelude.Left p0 ->
-                                   case p0 of {
-                                    (,) s o ->
-                                     case o of {
-                                      GHC.Base.Just s0 ->
-                                       case s0 of {
-                                        ExistT _ v ->
-                                         case isSetPSK v of {
-                                          GHC.Base.Just a2 ->
-                                           case a2 of {
-                                            (,) a3 b0 ->
-                                             (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
-                                               (\_ -> Prelude.Right (Prelude.Right
-                                               (Prelude.Right (Prelude.Right
-                                               (Prelude.Right
-                                               GHC.Base.Nothing)))))
-                                               (\n0' -> Prelude.Right (Prelude.Left
-                                               ((,) ((,) ((,) ((,) ((,) ((,) ((,) ()
-                                               n) c) p) n0') (replace_map a0 s m))
-                                               (GHC.Base.Just ((,) a0 FromSetPSK)))
-                                               (insert a3 b0 m0))))
-                                               n0};
-                                          GHC.Base.Nothing ->
-                                           case isSessionResume v of {
-                                            GHC.Base.Just a2 ->
-                                             case lookupAndDelete a2 m0 of {
-                                              (,) a3 b0 ->
-                                               (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
-                                                 (\_ -> Prelude.Right (Prelude.Right
-                                                 (Prelude.Right (Prelude.Right
-                                                 (Prelude.Right
-                                                 GHC.Base.Nothing)))))
-                                                 (\n0' -> Prelude.Right
-                                                 (Prelude.Left ((,) ((,) ((,) ((,)
-                                                 ((,) ((,) ((,) () n) c) p) n0')
-                                                 (replace_map a0 s m))
-                                                 (GHC.Base.Just ((,) a0
-                                                 (FromSessionResume a3)))) b0)))
-                                                 n0};
-                                            GHC.Base.Nothing -> Prelude.Right
-                                             (Prelude.Right (Prelude.Right
-                                             (Prelude.Right (Prelude.Left ((,) ((,)
-                                             ((,) ((,) ((,) ((,) ((,) ((,) ((,) ()
-                                             n) c) p) n0) m) m0) a0) s) v)))))}}};
-                                      GHC.Base.Nothing -> Prelude.Right
-                                       (Prelude.Right (Prelude.Right (Prelude.Right
-                                       (Prelude.Right GHC.Base.Nothing))))}};
-                                  Prelude.Right _ -> Prelude.Right (Prelude.Right
+                                 (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
+                                   (\_ -> Prelude.Right (Prelude.Right
                                    (Prelude.Right (Prelude.Right (Prelude.Right
-                                   GHC.Base.Nothing))))};
-                                GHC.Base.Nothing -> Prelude.Right (Prelude.Right
-                                 (Prelude.Right (Prelude.Right (Prelude.Right
-                                 GHC.Base.Nothing))))}};
+                                   (Prelude.Right GHC.Base.Nothing))))))
+                                   (\n2 ->
+                                   case readWrite_step a1 b of {
+                                    Prelude.Left p0 ->
+                                     case p0 of {
+                                      (,) s o ->
+                                       case o of {
+                                        GHC.Base.Just s0 ->
+                                         case s0 of {
+                                          ExistT _ v -> Prelude.Right (Prelude.Right
+                                           (Prelude.Right (Prelude.Right
+                                           (Prelude.Left ((,) ((,) ((,) ((,) ((,)
+                                           ((,) ((,) ((,) ((,) ((,) ((,) () n) n0)
+                                           c) p) n1) m0) a0) n2) m) s) v)))))};
+                                        GHC.Base.Nothing -> Prelude.Right
+                                         (Prelude.Right (Prelude.Right
+                                         (Prelude.Right (Prelude.Right
+                                         (Prelude.Right GHC.Base.Nothing)))))}};
+                                    Prelude.Right _ -> Prelude.Right (Prelude.Right
+                                     (Prelude.Right (Prelude.Right (Prelude.Right
+                                     (Prelude.Right GHC.Base.Nothing)))))})
+                                   n0;
+                                GHC.Base.Nothing ->
+                                 (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
+                                   (\_ -> Prelude.Right (Prelude.Right
+                                   (Prelude.Right (Prelude.Right (Prelude.Right
+                                   (Prelude.Right GHC.Base.Nothing))))))
+                                   (\n0' -> Prelude.Right (Prelude.Left ((,) ((,)
+                                   ((,) ((,) ((,) ((,) ((,) () n) n0) c) p) n0') m)
+                                   m0)))
+                                   n1}};
                             GHC.Base.Nothing ->
                              (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
                                (\_ -> Prelude.Right (Prelude.Right (Prelude.Right
-                               (Prelude.Right (Prelude.Right
-                               GHC.Base.Nothing)))))
+                               (Prelude.Right (Prelude.Right (Prelude.Right
+                               GHC.Base.Nothing))))))
                                (\n0' -> Prelude.Right (Prelude.Left ((,) ((,) ((,)
-                               ((,) ((,) ((,) ((,) () n) c) p) n0') m)
-                               GHC.Base.Nothing) m0)))
-                               n0})
+                               ((,) ((,) ((,) ((,) () n) n0) c) p) n0') m) m0)))
+                               n1})
                           (case unsafeCoerce r of {
                             GHC.Base.Just a ->
                              case a of {
                               (,) a0 b ->
-                               case bsearch a0 m of {
+                               case bsearch a0 m0 of {
                                 GHC.Base.Just a1 ->
-                                 case readWrite_step a1 b of {
-                                  Prelude.Left p0 ->
-                                   case p0 of {
-                                    (,) _ o ->
-                                     case o of {
-                                      GHC.Base.Just s0 ->
-                                       case s0 of {
-                                        ExistT _ v ->
-                                         case isSetPSK v of {
-                                          GHC.Base.Just _ ->
-                                           (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
-                                             (\_ -> GHC.Base.Nothing)
-                                             (\_ -> GHC.Base.Just (ExistT NewAccept
-                                             (unsafeCoerce ())))
-                                             n0;
-                                          GHC.Base.Nothing ->
-                                           case isSessionResume v of {
-                                            GHC.Base.Just _ ->
-                                             (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
-                                               (\_ -> GHC.Base.Nothing)
-                                               (\_ -> GHC.Base.Just (ExistT
-                                               NewAccept (unsafeCoerce ())))
-                                               n0;
-                                            GHC.Base.Nothing -> GHC.Base.Just
-                                             (ExistT Perform
-                                             (unsafeCoerce ((,) a0 v)))}}};
-                                      GHC.Base.Nothing -> GHC.Base.Nothing}};
-                                  Prelude.Right _ -> GHC.Base.Nothing};
-                                GHC.Base.Nothing -> GHC.Base.Nothing}};
+                                 (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
+                                   (\_ -> GHC.Base.Nothing)
+                                   (\_ ->
+                                   case readWrite_step a1 b of {
+                                    Prelude.Left p0 ->
+                                     case p0 of {
+                                      (,) _ o ->
+                                       case o of {
+                                        GHC.Base.Just _ -> GHC.Base.Just (ExistT
+                                         Skip (unsafeCoerce ()));
+                                        GHC.Base.Nothing -> GHC.Base.Nothing}};
+                                    Prelude.Right _ -> GHC.Base.Nothing})
+                                   n0;
+                                GHC.Base.Nothing ->
+                                 (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
+                                   (\_ -> GHC.Base.Nothing)
+                                   (\_ -> GHC.Base.Just (ExistT Accept
+                                   (unsafeCoerce ())))
+                                   n1}};
                             GHC.Base.Nothing ->
                              (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
                                (\_ -> GHC.Base.Nothing)
-                               (\_ -> GHC.Base.Just (ExistT NewAccept
+                               (\_ -> GHC.Base.Just (ExistT Accept
                                (unsafeCoerce ())))
-                               n0})))))))))))
+                               n1})))))))))))
           (sum_merge
             (prod_curry
               (prod_curry
@@ -6172,19 +5036,146 @@ main_loop_step =
                       (prod_curry
                         (prod_curry
                           (prod_curry
-                            (prod_curry (\_ n c p n0 m m0 s p0 _ ->
-                              lift_conn Perform (\_ -> Prelude.Left ((,)
-                                ((\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
-                                   (\_ -> Prelude.Right (Prelude.Right
-                                   (Prelude.Right (Prelude.Right (Prelude.Right
-                                   GHC.Base.Nothing)))))
-                                   (\n0' -> Prelude.Right (Prelude.Left ((,) ((,)
-                                   ((,) ((,) ((,) ((,) ((,) () n) c) p) n0')
-                                   (replace_map s p0 m)) GHC.Base.Nothing) m0)))
-                                   n0)
-                                ((\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
-                                   (\_ -> GHC.Base.Nothing)
-                                   (\_ -> GHC.Base.Just (ExistT NewAccept
-                                   (unsafeCoerce ())))
-                                   n0))))))))))))) (\o _ _ -> Prelude.Right o)))))
+                            (prod_curry
+                              (prod_curry
+                                (prod_curry (\_ n n0 c p n1 m s n2 m0 p0 a ->
+                                  lift_conn Skip (\_ -> Prelude.Left ((,)
+                                    (case isSetPSK a of {
+                                      GHC.Base.Just a0 ->
+                                       case a0 of {
+                                        (,) a1 b ->
+                                         (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
+                                           (\_ -> Prelude.Right (Prelude.Right
+                                           (Prelude.Right (Prelude.Right
+                                           (Prelude.Right (Prelude.Right
+                                           GHC.Base.Nothing))))))
+                                           (\n0' ->
+                                           case readWrite_step p0 FromSetPSK of {
+                                            Prelude.Left p1 ->
+                                             case p1 of {
+                                              (,) s0 o ->
+                                               case o of {
+                                                GHC.Base.Just s1 ->
+                                                 case s1 of {
+                                                  ExistT _ v -> Prelude.Right
+                                                   (Prelude.Right (Prelude.Right
+                                                   (Prelude.Right (Prelude.Left ((,)
+                                                   ((,) ((,) ((,) ((,) ((,) ((,)
+                                                   ((,) ((,) ((,) ((,) () n) n0) c)
+                                                   p) n1) m) s) n0')
+                                                   (insert a1 b m0)) s0) v)))))};
+                                                GHC.Base.Nothing -> Prelude.Right
+                                                 (Prelude.Right (Prelude.Right
+                                                 (Prelude.Right (Prelude.Right
+                                                 (Prelude.Right
+                                                 GHC.Base.Nothing)))))}};
+                                            Prelude.Right _ -> Prelude.Right
+                                             (Prelude.Right (Prelude.Right
+                                             (Prelude.Right (Prelude.Right
+                                             (Prelude.Right GHC.Base.Nothing)))))})
+                                           n2};
+                                      GHC.Base.Nothing ->
+                                       case isSessionResume a of {
+                                        GHC.Base.Just a0 ->
+                                         case lookupAndDelete a0 m0 of {
+                                          (,) a1 b ->
+                                           (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
+                                             (\_ -> Prelude.Right (Prelude.Right
+                                             (Prelude.Right (Prelude.Right
+                                             (Prelude.Right (Prelude.Right
+                                             GHC.Base.Nothing))))))
+                                             (\n0' ->
+                                             case readWrite_step p0
+                                                    (FromSessionResume a1) of {
+                                              Prelude.Left p1 ->
+                                               case p1 of {
+                                                (,) s0 o ->
+                                                 case o of {
+                                                  GHC.Base.Just s1 ->
+                                                   case s1 of {
+                                                    ExistT _ v -> Prelude.Right
+                                                     (Prelude.Right (Prelude.Right
+                                                     (Prelude.Right (Prelude.Left
+                                                     ((,) ((,) ((,) ((,) ((,) ((,)
+                                                     ((,) ((,) ((,) ((,) ((,) () n)
+                                                     n0) c) p) n1) m) s) n0') b) s0)
+                                                     v)))))};
+                                                  GHC.Base.Nothing -> Prelude.Right
+                                                   (Prelude.Right (Prelude.Right
+                                                   (Prelude.Right (Prelude.Right
+                                                   (Prelude.Right
+                                                   GHC.Base.Nothing)))))}};
+                                              Prelude.Right _ -> Prelude.Right
+                                               (Prelude.Right (Prelude.Right
+                                               (Prelude.Right (Prelude.Right
+                                               (Prelude.Right GHC.Base.Nothing)))))})
+                                             n2};
+                                        GHC.Base.Nothing -> Prelude.Right
+                                         (Prelude.Right (Prelude.Right
+                                         (Prelude.Right (Prelude.Right (Prelude.Left
+                                         ((,) ((,) ((,) ((,) ((,) ((,) ((,) ((,)
+                                         ((,) ((,) () n) n0) c) p) n1) m) s) m0) p0)
+                                         a))))))}})
+                                    (case isSetPSK a of {
+                                      GHC.Base.Just _ ->
+                                       (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
+                                         (\_ -> GHC.Base.Nothing)
+                                         (\_ ->
+                                         case readWrite_step p0 FromSetPSK of {
+                                          Prelude.Left p1 ->
+                                           case p1 of {
+                                            (,) _ o ->
+                                             case o of {
+                                              GHC.Base.Just _ -> GHC.Base.Just
+                                               (ExistT Skip (unsafeCoerce ()));
+                                              GHC.Base.Nothing -> GHC.Base.Nothing}};
+                                          Prelude.Right _ -> GHC.Base.Nothing})
+                                         n2;
+                                      GHC.Base.Nothing ->
+                                       case isSessionResume a of {
+                                        GHC.Base.Just a0 ->
+                                         case lookupAndDelete a0 m0 of {
+                                          (,) a1 _ ->
+                                           (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
+                                             (\_ -> GHC.Base.Nothing)
+                                             (\_ ->
+                                             case readWrite_step p0
+                                                    (FromSessionResume a1) of {
+                                              Prelude.Left p1 ->
+                                               case p1 of {
+                                                (,) _ o ->
+                                                 case o of {
+                                                  GHC.Base.Just _ -> GHC.Base.Just
+                                                   (ExistT Skip (unsafeCoerce ()));
+                                                  GHC.Base.Nothing ->
+                                                   GHC.Base.Nothing}};
+                                              Prelude.Right _ -> GHC.Base.Nothing})
+                                             n2};
+                                        GHC.Base.Nothing -> GHC.Base.Just (ExistT
+                                         Perform (unsafeCoerce ((,) s a)))}})))))))))))))))
+            (sum_merge
+              (prod_curry
+                (prod_curry
+                  (prod_curry
+                    (prod_curry
+                      (prod_curry
+                        (prod_curry
+                          (prod_curry
+                            (prod_curry
+                              (prod_curry
+                                (prod_curry (\_ n n0 c p n1 m s m0 p0 _ ->
+                                  lift_conn Perform (\_ -> Prelude.Left ((,)
+                                    ((\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
+                                       (\_ -> Prelude.Right (Prelude.Right
+                                       (Prelude.Right (Prelude.Right (Prelude.Right
+                                       (Prelude.Right GHC.Base.Nothing))))))
+                                       (\n0' -> Prelude.Right (Prelude.Left ((,)
+                                       ((,) ((,) ((,) ((,) ((,) ((,) () n) n0) c) p)
+                                       n0') m0) (replace_map s p0 m))))
+                                       n1)
+                                    ((\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
+                                       (\_ -> GHC.Base.Nothing)
+                                       (\_ -> GHC.Base.Just (ExistT Accept
+                                       (unsafeCoerce ())))
+                                       n1)))))))))))))) (\o _ _ -> Prelude.Right o))))))
 

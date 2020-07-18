@@ -529,7 +529,7 @@ Definition rets_tls :=
 
 Notation "r <- 'yield' 'SetPSK' $ a ; p" :=
   (Eff yield (setPSK a)
-       (fun r' => option_branch (fun r => p) (Return inhabitant) (fromSetPSK r')))
+       (fun r => p))
     (at level 100, right associativity).
 
 Notation "r <- 'yield' 'SessionResume' $ a ; p" :=
@@ -552,7 +552,7 @@ Notation "r <- 'yield' 'RecvClientHello' $ a ; p" :=
        (fun r' => option_branch
                     (fun r => p)
                     (option_branch (fun al => Eff yield (sendPacket (PAlert [al]))
-                                                  (fun _ => Return inhabitant))
+                                                  (fun _ => _ <- yield Close $ tt; Return inhabitant))
                                    (Return inhabitant) (retAlert r'))
                     (fromRecvClientHello r')))
        (at level 100, right associativity).
@@ -562,7 +562,7 @@ Notation "r <- 'yield' 'RecvData' $ a ; p" :=
        (fun r' => option_branch
                     (fun r => p)
                     (option_branch (fun al => Eff yield (sendPacket (PAlert [al]))
-                                                  (fun _ => Return inhabitant))
+                                                  (fun _ => _ <- yield Close $ tt; Return inhabitant))
                                    (Return inhabitant) (retAlert r'))
                     (fromRecvData r')))
     (at level 100, right associativity).
@@ -572,7 +572,7 @@ Notation "r <- 'yield' 'RecvFinished' $ a ; p" :=
        (fun r' => option_branch
                     (fun r => p)
                     (option_branch (fun al => Eff yield (sendPacket (PAlert [al]))
-                                                  (fun _ => Return inhabitant))
+                                                  (fun _ => _ <- yield Close $ tt; Return inhabitant))
                                    (Return inhabitant) (retAlert r'))
                     (fromRecvFinished r')))
     (at level 100, right associativity).
@@ -582,7 +582,7 @@ Notation "r <- 'yield' 'RecvCCS' $ a ; p" :=
        (fun r' => option_branch
                     (fun r => p)
                     (option_branch (fun al => Eff yield (sendPacket (PAlert [al]))
-                                                  (fun _ => Return inhabitant))
+                                                  (fun _ => _ <- yield Close $ tt; Return inhabitant))
                                    (Return inhabitant) (retAlert r'))
                     (fromRecvCCS r')))
     (at level 100, right associativity).
@@ -592,7 +592,7 @@ Notation "r <- 'yield' 'RecvAppData' $ a ; p" :=
        (fun r' => option_branch
                     (fun r => p)
                     (option_branch (fun al => Eff yield (sendPacket (PAlert [al]))
-                                                  (fun _ => Return inhabitant))
+                                                  (fun _ => _ <- yield Close $ tt; Return inhabitant))
                                    (Return inhabitant) (retAlert r'))
                     (fromRecvAppData r')))
     (at level 100, right associativity).
@@ -619,106 +619,9 @@ Notation "r <- 'yield' 'MakeCertVerify' $ a ; p" :=
 
 Notation "r <- 'yield' 'SetSecret' $ a ; p" :=
   (Eff yield (setSecret a)
-       (fun r' => option_branch (fun r => p) (Return inhabitant) (fromSetSecret r')))
-    (at level 100, right associativity).
-
-(*
-
-Notation "r <- 'yield' 'SetPSK' $ a ; p" :=
-  (Eff yield (inl (inl (inl (inl (inl (inl (inl (inl (inl (inl (inl a)))))))))))
-       (fun r' => option_branch (fun r => p) (Return inhabitant) (fromSetPSK r')))
-    (at level 100, right associativity).
-
-Notation "r <- 'yield' 'SessionResume' $ a ; p" :=
-  (Eff yield (inl (inl (inl (inl (inl (inl (inl (inl (inl (inl (inr a)))))))))))
-       (fun r' => option_branch (fun r => p) (Return inhabitant) (fromSessionResume r')))
-    (at level 100, right associativity).
-
-Notation "r <- 'yield' 'GetCurrentTime' $ a ; p" :=
-  (Eff yield (inl (inl (inl (inl (inl (inl (inl (inl (inl (inr a))))))))))
-       (fun r' => option_branch (fun r => p) (Return inhabitant) (fromGetCurrentTime r')))
-       (at level 100, right associativity).
-
-Notation "r <- 'yield' 'Close' $ a ; p" :=
-  (Eff yield (inl (inl (inl (inl (inl (inl (inl (inl (inr a)))))))))
        (fun r => p))
     (at level 100, right associativity).
 
-Notation "r <- 'yield' 'RecvClientHello' $ a ; p" :=
-  (Eff yield (inr (inr a))
-       (fun r' => option_branch
-                    (fun r => p)
-                    (option_branch (fun al => Eff yield (inl (inr (PAlert [al])))
-                                                  (fun _ => Return inhabitant))
-                                   (Return inhabitant) (retAlert r'))
-                    (fromRecvClientHello r')))
-       (at level 100, right associativity).
-
-Notation "r <- 'yield' 'RecvData' $ a ; p" :=
-  (Eff yield (inl (inl (inl (inl (inl (inr a))))))
-       (fun r' => option_branch
-                    (fun r => p)
-                    (option_branch (fun al => Eff yield (inl (inr (PAlert [al])))
-                                                  (fun _ => Return inhabitant))
-                                   (Return inhabitant) (retAlert r'))
-                    (fromRecvData r')))
-    (at level 100, right associativity).
-
-Notation "r <- 'yield' 'RecvFinished' $ a ; p" :=
-  (Eff yield (inr (inl (inl (inr a))))
-       (fun r' => option_branch
-                    (fun r => p)
-                    (option_branch (fun al => Eff yield (inl (inr (PAlert [al])))
-                                                  (fun _ => Return inhabitant))
-                                   (Return inhabitant) (retAlert r'))
-                    (fromRecvData r')))
-    (at level 100, right associativity).
-
-Notation "r <- 'yield' 'RecvCCS' $ a ; p" :=
-  (Eff yield (inr (inl (inr a)))
-       (fun r' => option_branch
-                    (fun r => p)
-                    (option_branch (fun al => Eff yield (inl (inr (PAlert [al])))
-                                                  (fun _ => Return inhabitant))
-                                   (Return inhabitant) (retAlert r'))
-                    (fromRecvCCS r')))
-    (at level 100, right associativity).
-
-Notation "r <- 'yield' 'RecvAppData' $ a ; p" :=
-  (Eff yield (inr (inl (inl (inl a))))
-       (fun r' => option_branch
-                    (fun r => p)
-                    (option_branch (fun al => Eff yield (inl (inr (PAlert [al])))
-                                                  (fun _ => Return inhabitant))
-                                   (Return inhabitant) (retAlert r'))
-                    (fromRecvAppData r')))
-    (at level 100, right associativity).
-
-Notation "r <- 'yield' 'GetRandomBytes' $ a ; p" :=
-  (Eff yield (inl (inl (inl (inl (inl (inl (inr a)))))))
-       (fun r' => option_branch (fun r => p) (Return inhabitant) (fromGetRandomBytes r')))
-    (at level 100, right associativity).
-
-Notation "r <- 'yield' 'SendPacket' $ a ; p" :=
-  (Eff yield (inl (inr a))
-       (fun r' => option_branch (fun r => p) (Return inhabitant) (fromSendPacket r')))
-    (at level 100, right associativity).
-
-Notation "r <- 'yield' 'GroupGetPubShared' $ a ; p" :=
-  (Eff yield (inl (inl (inl (inl (inr a)))))
-       (fun r' => option_branch (fun r => p) (Return inhabitant) (fromGroupGetPubShared r')))
-    (at level 100, right associativity).
-
-Notation "r <- 'yield' 'MakeCertVerify' $ a ; p" :=
-  (Eff yield (inl (inl (inl (inr a))))
-       (fun r' => option_branch (fun r => p) (Return inhabitant) (fromMakeCertVerify r')))
-    (at level 100, right associativity).
-
-Notation "r <- 'yield' 'SetSecret' $ a ; p" :=
-  (Eff yield (inl (inl (inr a)))
-       (fun r' => option_branch (fun r => p) (Return inhabitant) (fromSetSecret r')))
-    (at level 100, right associativity).
-*)
 
 Instance sigT_rets_inhabit : Inhabit rets_tls :=
   { inhabitant := FromSetPSK }.
@@ -734,7 +637,7 @@ Definition hdReadLen hd :=
   | header _ _ n => n
   end.
 
-Parameter decodeHeader : ByteString -> option Header.
+Parameter decodeHeader : ByteString -> AlertDescription + Header.
 Parameter decodeRecord : Header -> option (Hash * Cipher * ByteString * nat) -> ByteString -> AlertLevel * AlertDescription + CPacket.
 Parameter Bsplit :  nat -> ByteString -> ByteString * ByteString.
 
@@ -947,7 +850,7 @@ Parameter bytes2w32 : ByteString -> Word32.
 Parameter life : Word32.
 
 Definition doHandshake (fuel:nat) (cch: CertificateChain)(pr: PrivateKey)(_: rets_tls)
-  : t (const_yield args_tls) (const_yield rets_tls) unit := Eval unfold option_branch in
+  : t (const_yield args_tls) (const_yield rets_tls) unit :=
   Def (fun al => _ <- yield SendPacket $ PAlert [(Alert_Fatal, al)];
                  _ <- yield Close $ tt;
                  Return tt) (fun alert =>
@@ -1074,7 +977,6 @@ Definition doHandshake (fuel:nat) (cch: CertificateChain)(pr: PrivateKey)(_: ret
   let clientApplicationSecret := hkdfExpandLabel usedHash applicationSecret (s2b "c ap traffic") hashed'' hsize in
   let serverApplicationSecret := hkdfExpandLabel usedHash applicationSecret (s2b "s ap traffic") hashed'' hsize in
 
-  _ <- yield RecvCCS $ tt;
   _ <- yield SetSecret $ (usedHash, cipher, clientHandshakeSecret, true);
   fin <- yield RecvFinished $ tt;
   cfRecvTime <- yield GetCurrentTime $ tt;
@@ -1082,9 +984,13 @@ Definition doHandshake (fuel:nat) (cch: CertificateChain)(pr: PrivateKey)(_: ret
   (* calculate application secrets *)
   let hashed''' := hashWith (cipherHash cipher) (transcript ++ [finEncoded; encodeHandshake13 (HFinished fin)]) in
   let resumptionMasterSecret := hkdfExpandLabel usedHash applicationSecret (s2b "res master") hashed''' hsize in
-  if ByteString_beq fin (makeVerifyData usedHash clientHandshakeSecret hashed'') then
-    nonce <- yield GetRandomBytes $ 32;
-    bAgeAdd <- yield GetRandomBytes $ 4;
+  _ <- yield SetSecret $ (usedHash, cipher, serverApplicationSecret, false);
+  _ <- yield SetSecret $ (usedHash, cipher, clientApplicationSecret, true);
+  if ByteString_beq fin (makeVerifyData usedHash clientHandshakeSecret hashed'') then (*
+    b <- yield GetRandomBytes $ 36;
+      let nonceBAgeAdd := Bsplit 32 b in
+      let nonce := fst nonceBAgeAdd in
+      let bAgeAdd := snd nonceBAgeAdd in
     let bAdd := bytes2w32 bAgeAdd in
     let tinfo := {| lifetime := life;
                     ageAdd := bAdd;
@@ -1104,27 +1010,28 @@ Definition doHandshake (fuel:nat) (cch: CertificateChain)(pr: PrivateKey)(_: ret
                             sessionMaxEarlyDataSize := 5;
                             sessionFlags := []
                          |});
-    _ <- yield SetSecret $ (usedHash, cipher, serverApplicationSecret, false);
-    _ <- yield SetSecret $ (usedHash, cipher, clientApplicationSecret, true);
+    _ <- yield SendPacket $ pac; *)
+    data <- yield RecvAppData $ tt;
+    x <- yield SendPacket $ (PAppData (mconcat ([s2b ("HTTP/1.1 200 OK" ++ CR ++ LF ++ "Content-Type: text/plain" ++ CR ++ LF ++ CR ++ LF ++ "Hello, "); data; s2b ("!" ++ CR ++ LF)])));
+    _ <- yield Close $ tt; Return tt
+      (*
     _ <- yield SendPacket $ pac;
     _ <- yield Close $ tt;
     Return tt
-    (*
-    nat_rect_nondep
+*)
+(*    nat_rect_nondep
       (fun _ => Return tt)
       (fun _ rec _ =>
          data <- yield RecvAppData $ (Some (usedHash, cipher, clientApplicationSecret));
          x <- yield SendPacket $ (PAppData13 (mconcat ([s2b ("HTTP/1.1 200 OK" ++ CR ++ LF ++ "Content-Type: text/plain" ++ CR ++ LF ++ CR ++ LF ++ "Hello, "); data; s2b ("!" ++ CR ++ LF)])), Some (usedHash, cipher, serverApplicationSecret));
          rec tt)
       fuel tt
-*)
+ *)
   else
     _ <- yield SendPacket $ (PAlert [(Alert_Fatal, DecryptError)]);
     _ <- yield Close $ tt; 
     Return tt)
 .
-
-Opaque replicate.
 
 Definition doHandshake_derive :
   { state & { step &
@@ -1133,12 +1040,11 @@ Definition doHandshake_derive :
 Proof.
   do 3 eexists.
   unfold doHandshake.
-  Set Ltac Profiling.
-  derive_coro (tt,fuel,certs,priv).
-  Show Ltac Profile.
-  Grab Existential Variables.
-  all: exact inhabitant.
-Time Defined.
+  Time (unshelve derive_coro (tt,fuel,certs,priv); exact inhabitant).
+  Optimize Proof.
+  Time Defined.
+
+
 
 Definition doHandshake_step := projT1 (projT2 doHandshake_derive).
 
@@ -1159,34 +1065,40 @@ Notation "r <- 'yield' 'SendData' $ a ; p" :=
     (at level 100, right associativity).
  *)
 
-Definition decode header bs (s:unit+unit+unit+unit) o : t (const_yield args_tls) (const_yield rets_tls) rets_tls :=
+
+
+Definition decode header bs (s:unit+unit+unit+unit) o : t (const_yield args_tls) (const_yield rets_tls) (option rets_tls) :=
   match decodeRecord header o bs with
-  | inl al => Return (RetAlert al)
-  | inr r => 
-    match s with
-    | inr _ =>
-      match clientHello r with
-      | None => Return (RetAlert (Alert_Fatal, UnexpectedMessage))
-      | Some c => Return (FromRecvClientHello (bs,c))
-      end
-    | inl (inr _) =>
-      match changeCipherSpec r with
-      | None => Return (RetAlert (Alert_Fatal, UnexpectedMessage))
-      | Some _ => Return FromRecvCCS
-      end
-    | inl (inl (inr _)) =>
-      match handshake r with
-      | None => Return (RetAlert (Alert_Fatal, UnexpectedMessage))
-      | Some h =>
-        match finished h with
-        | None => Return (RetAlert (Alert_Fatal, UnexpectedMessage))
-        | Some f => Return (FromRecvFinished f)
+  | inl al => Return (Some (RetAlert al))
+  | inr r =>
+    match changeCipherSpec r with
+    | Some _ => Return None
+    | None =>
+      match s with
+      | inr _ =>
+        match clientHello r with
+        | None => Return (Some (RetAlert (Alert_Fatal, UnexpectedMessage)))
+        | Some c => Return (Some (FromRecvClientHello (bs,c)))
         end
-      end
-    | inl (inl (inl _)) =>
-      match appData r with
-      | None => Return (RetAlert (Alert_Fatal, UnexpectedMessage))
-      | Some a => Return (FromRecvAppData a)
+      | inl (inr _) =>
+        match changeCipherSpec r with
+        | None => Return (Some (RetAlert (Alert_Fatal, UnexpectedMessage)))
+        | Some _ => Return (Some FromRecvCCS)
+        end
+      | inl (inl (inr _)) =>
+        match handshake r with
+        | None => Return (Some (RetAlert (Alert_Fatal, UnexpectedMessage)))
+        | Some h =>
+          match finished h with
+          | None => Return (Some (RetAlert (Alert_Fatal, UnexpectedMessage)))
+          | Some f => Return (Some (FromRecvFinished f))
+          end
+        end
+      | inl (inl (inl _)) =>
+        match appData r with
+        | None => Return (Some (RetAlert (Alert_Fatal, UnexpectedMessage)))
+        | Some a => Return (Some (FromRecvAppData a))
+        end
       end
     end
   end.
@@ -1285,9 +1197,9 @@ Definition readWrite fuel certs keys(_: rets_tls) : t (const_yield _) (const_yie
            rec (recvinfo, sendinfo, Some mtype, mconcat [bs; bs'], a, c)
          else
            let (hd,rest) := Bsplit 5 bs in
-           match decodeHeader hd with
-           | None => rec (recvinfo, sendinfo, None, rest, RetAlert (Alert_Fatal, DecodeError), c)
-           | Some hdr =>
+           match decodeHeader' hd with
+           | inl al => rec (recvinfo, sendinfo, None, rest, RetAlert (Alert_Fatal, al), c)
+           | inr hdr =>
              if Nat.ltb maxCiphertextSize (hdReadLen hdr) then
                rec (recvinfo, sendinfo, None, empty, RetAlert (Alert_Fatal, RecordOverflow), c)
              else if Nat.ltb (Blength rest) (hdReadLen hdr) then
@@ -1295,11 +1207,15 @@ Definition readWrite fuel certs keys(_: rets_tls) : t (const_yield _) (const_yie
                rec (recvinfo, sendinfo, Some mtype, mconcat [bs; bs'], a, c)
              else
              let (msg,rest') := Bsplit (hdReadLen hdr) rest in
-             a' <<- decode hdr msg mtype recvinfo;
-             match recvinfo with
-             | Some (q, num) =>
-               rec (Some (q, S num), sendinfo, None, rest', a', c)
-             | None => rec (None, sendinfo, None, rest', a', c)
+             oa' <<- decode hdr msg mtype recvinfo;
+             match oa' with
+             | None => rec (recvinfo, sendinfo, Some mtype, rest', a, c)
+             | Some a' =>
+               match recvinfo with
+               | Some (q, num) =>
+                 rec (Some (q, S num), sendinfo, None, rest', a', c)
+               | None => rec (None, sendinfo, None, rest', a', c)
+               end
              end
            end
        end
@@ -1324,26 +1240,26 @@ Definition readWrite_derive :
 Proof.
   do 3 eexists.
   unfold decode.
-  Set Ltac Profiling.
   unshelve derive (tt,fuel,certs,priv); exact inhabitant.
-  Show Ltac Profile.
 Time Defined.
 
-Inductive eff_conn := newAccept | perform | receive.
+Inductive eff_conn := accept | perform | receive | skip.
 
 
 Definition args_conn (e : eff_conn) :=
   match e with
-  | newAccept => unit
+  | accept => unit
   | perform => string * args_tls
   | receive => unit
+  | skip => unit
   end.
 
 Definition rets_conn (e : eff_conn) :=
   match e with
-  | newAccept => option string
+  | accept => option string
   | perform => unit
   | receive => option (string * rets_tls)
+  | skip => unit
   end.
 
 Notation "r <- ef a ; p" :=
@@ -1400,13 +1316,12 @@ Fixpoint lookupAndDelete' {A : Set} key (m : Map A) (ctx : Map A -> Map A) :=
 Definition lookupAndDelete {A : Set} key (m : Map A) :=
   lookupAndDelete' key m (fun x => x).
 
-Definition main_loop fuel fuel' certs keys := Eval unfold option_branch in
+Definition main_loop fuel fuel' fuel'' certs keys := Eval unfold option_branch in
   nat_rect_nondep
     (fun _ => Return (@None unit))
-    (fun _ rec ormaps =>
-       let (orm,coros) := ormaps : option (string * rets_tls) * Map SessionData * Map (coro_type readWrite_step) in
-       let (or,m) := orm : option (string * rets_tls) * Map SessionData in
-       osa <- newAccept tt;
+    (fun _ rec maps =>
+       let (m,coros) := maps : Map SessionData * Map (coro_type readWrite_step) in
+       osa <- accept tt;
          match osa with
          | Some sa =>
            pipe (readWrite fuel' certs keys : coro_type readWrite_step)
@@ -1414,42 +1329,40 @@ Definition main_loop fuel fuel' certs keys := Eval unfold option_branch in
                    ef <- resume c $ inhabitant;
                      _ <- perform (sa, ef);
                      let coros' := insert sa c coros in
-                     rec (or, m, coros'))
+                     rec (m, coros'))
          | None =>
-           osar <<-
-               match or with
-               | Some p => Return (Some p)
-               | None =>
-                 o <- receive tt;
-                 match o with
-                 | None => Return None
-                 | Some p => Return (Some p)
-                 end
-               end;
+           osar <- receive tt;
            match osar with
-           | None => rec (None, m, coros)
+           | None => rec (m,coros)
            | Some (sa,r) =>
              let ocoro := bsearch sa coros in
-             coro <~ ifSome ocoro {{ Return None }}
-             ef <- resume coro $ r;
-             let coros' := replace_map sa coro coros in
-             match isSetPSK ef with
-             | Some (sid,sess) =>
-               let m' := insert sid sess m in
-               rec (Some (sa, FromSetPSK), m', coros')
-             | None =>
-               match isSessionResume ef with
-               | Some sid =>
-                 let (sess,m') := lookupAndDelete sid m in
-                 rec (Some (sa, (FromSessionResume sess)), m', coros')
-               | None =>
-                 _ <- perform (sa,ef);
-                 rec (None, m, coros')
-               end
-             end
+             coro <~ ifSome ocoro {{ rec (m,coros) }}
+             nat_rect_nondep
+               (fun mcoro => Return None)
+               (fun _ rec_inner rmcoro =>
+                  let (rm,coro) := (rmcoro : rets_tls * Map SessionData * coro_type readWrite_step) in
+                  let (r,m) := (rm : rets_tls * Map SessionData) in
+                  ef <- resume coro $ r;
+                  _ <- skip tt;
+                  match isSetPSK ef with
+                  | Some (sid,sess) =>
+                    let m' := insert sid sess m in
+                    rec_inner (FromSetPSK,m', coro)
+                  | None =>
+                    match isSessionResume ef with
+                    | Some sid =>
+                      let (sess,m') := lookupAndDelete sid m in
+                      rec_inner (FromSessionResume sess, m', coro)
+                    | None =>
+                      _ <- perform (sa,ef);
+                      let coros' := replace_map sa coro coros in
+                      rec (m, coros')
+                    end
+                  end)
+               fuel'' (r, m, coro)
            end
          end)
-    fuel (None, Leaf _, Leaf _).
+    fuel (Leaf _, Leaf _).
 
 Parameter certs_dummy : CertificateChain.
 Parameter privkey_dummy : PrivateKey.
@@ -1466,10 +1379,10 @@ Definition lift_conn A B(e : eff_conn)(a : rets_conn e -> A + option B) e0
   e as e1
   return ((rets_conn e1 -> A + option B) -> rets_conn e0 -> A + option B)
   with
-  | newAccept =>
-    fun a0 : rets_conn newAccept -> A + option B =>
+  | accept =>
+    fun a0 : rets_conn accept -> A + option B =>
       match e0 as e1 return (rets_conn e1 -> A + option B) with
-      | newAccept => a0
+      | accept => a0
       | _ => fun _ => inr None
       end
   | perform =>
@@ -1482,6 +1395,12 @@ Definition lift_conn A B(e : eff_conn)(a : rets_conn e -> A + option B) e0
     fun a0 : rets_conn receive -> A + option B =>
       match e0 as e1 return (rets_conn e1 -> A + option B) with
       | receive => a0
+      | _ => fun _ => inr None
+      end
+  | skip =>
+    fun a0 : rets_conn skip -> A + option B =>
+      match e0 as e1 return (rets_conn e1 -> A + option B) with
+      | skip => a0
       | _ => fun _ => inr None
       end
   end a.
@@ -1509,330 +1428,12 @@ Instance GroupPublic_Inhabit : Inhabit GroupPublic :=
 Instance SessionData_Inhabit : Inhabit SessionData :=
   { inhabitant := sd_dummy }.
 
-Ltac sum_match_fun_l expr :=
-  lazymatch expr with
-  | (match ?o with inl _ => _ | inr _ => _ end) =>
-    lazymatch eval pattern o in expr with
-    | ?F _ => eval cbv beta iota in (fun a => F (inl a))
-    end
-  end.
-
-Ltac sum_match_fun_r expr :=
-  lazymatch expr with
-  | (match ?o with inl _ => _ | inr _ => _ end) =>
-    lazymatch eval pattern o in expr with
-    | ?F _ => eval cbv beta iota in (fun a => F (inr a))
-    end
-  end.
-
-Ltac to_dummy' i p :=
-  lazymatch p with
-  | pipe ?c ?f =>
-    let init := get_init c in
-    let x := (eval cbv beta in (f (dummy _ _ i))) in
-    let d := to_dummy' (S i) x in
-    lazymatch d with
-    | context [dummy _ ?T i] =>
-      lazymatch (eval pattern (dummy _ T i) in d) with
-      | ?g _ =>
-        constr:((pipe, init, g))
-      end
-    end
-  | @Eff ?eff ?args ?rets ?C ?e ?a ?f =>
-    let x := (eval cbv beta in (f (dummy _ _ i))) in
-    let d := to_dummy' (S i) x in
-    lazymatch type of f with
-    | ?T -> _ =>
-      lazymatch (eval pattern (dummy _ T i) in d) with
-      | ?g _ =>
-        constr:((@Eff eff args rets C e a, g))
-      end
-    end
-  | @proc_coro ?A ?B ?C ?D ?eff ?args ?rets ?state ?step ?c ?z ?f =>
-    let x := (eval cbv beta in (f (dummy _ _ i) (dummy _ _ (S i)))) in
-    lazymatch f with
-    | (*context [proc_coro]*) _  =>
-      let d := to_dummy' (S (S i)) x in
-      lazymatch type of f with
-      | _ -> ?T -> _ =>
-        lazymatch (eval pattern (dummy _ A i), (dummy _ T (S i)) in d) with
-        | ?g _ _ =>
-          constr:((@seq_abs A B eff args rets D state step z (coro_type step) c, g))
-        end
-      end(*
-    | _ =>
-      constr:((@seq_abs A B eff args rets D state step z (coro_type step) c, f))
-*)
-    end
-  | @bind ?T ?T' ?eff ?args ?rets ?p ?f =>
-    let x :=  (eval cbv beta in (f (dummy _ _ i))) in
-    let d := to_dummy' (S i) x in
-    lazymatch (eval pattern (dummy _ T i) in d) with
-    | ?g _ =>
-      constr:((@bind T T' eff args rets p, g))
-    end
-  | (match ?o with inl _ => _ | inr _ => _ end) =>
-    let fl := sum_match_fun_l p in
-    let fr := sum_match_fun_r p in
-    let ty := type of fl in
-    lazymatch ty with
-    | ?A -> _ =>
-      let ty' := type of fr in
-      lazymatch ty' with
-      | ?B -> _ =>
-        let xl := (eval cbv beta in (fl (dummy _ _ i))) in
-        let xr := (eval cbv beta in (fr (dummy _ _ i))) in
-        let dl := to_dummy' (S i) xl in
-        let dr := to_dummy' (S i) xr in
-        lazymatch (eval pattern (dummy _ A i) in dl) with
-        | ?gl _ =>
-          lazymatch (eval pattern (dummy _ B i) in dr) with
-          | ?gr _ => constr:((@sum_merge A B, gl, gr, o))
-          end
-        end
-      end
-    end
-  | (match ?o with Some _ => _ | None => ?f0 end) =>
-    let f := opt_match_fun p in
-    let ty := type of o in
-    lazymatch ty with
-    | option ?A =>
-      let B := type of p in
-      let x := (eval cbv beta in (f (dummy _ _ i))) in
-      let d := to_dummy' (S i) x in
-      let d0 := to_dummy' i f0 in
-      lazymatch (eval pattern (dummy _ A i) in d) with
-      | ?g _ =>
-        constr:((@option_branch A B, g, d0, o))
-      end
-    | _ =>
-      lazymatch (eval simpl in ty) with
-      | option ?A =>
-        let B := type of p in
-        let x := (eval cbv beta in (f (dummy _ _ i))) in
-        let d := to_dummy' (S i) x in
-        let d0 := to_dummy' i f0 in
-        lazymatch (eval pattern (dummy _ A i) in d) with
-        | ?g _ =>
-          constr:((@option_branch A B, g, d0, o))
-        end
-      end
-    end
-  | (match ?o with (a,b) => _ end) =>
-    lazymatch (eval pattern o in p) with
-    | ?F _ =>
-      let f := (eval cbv beta iota in (fun a b => F (a,b))) in
-      let x := (eval cbv beta in (f (dummy _ _ i) (dummy _ _ (S i)))) in
-      let d := to_dummy' (S (S i)) x in
-      lazymatch type of o with
-      | ?A * ?B =>
-        lazymatch (eval pattern (dummy _ A i), (dummy _ B (S i)) in d) with
-        | ?g _ _ => constr:((@prod_curry A B, g, o))
-        end
-      end
-    end
-  | @nat_rect_nondep ?A ?f ?f0 ?n ?a =>
-    let x := (eval cbv beta in (f0 (dummy _ _ i) (dummy _ _ (S i)) (dummy _ _ (S (S i))))) in
-    let y := (eval cbv beta in (f (dummy _ _ i))) in
-    let d := to_dummy' (S i) y in
-    let d0 := to_dummy' (S (S (S i))) x in
-(*    let T := type of a in*)
-    lazymatch A with
-      ?T -> _ =>
-      lazymatch (eval pattern (dummy _ nat i), (dummy _ A (S i)), (dummy _ T (S (S i))) in d0) with
-      | ?g0 _ _ _ =>
-        lazymatch (eval pattern (dummy _ T i) in d) with
-        | ?g _ =>
-          constr:((@nat_rect_nondep A, g, g0, n, a))
-        end
-      end
-    end
-  | @list_rec_nondep ?A ?B ?f ?f0 ?l ?a =>
-    let x := (eval cbv beta in (f0 (dummy _ _ i) (dummy _ _ (S i)) (dummy _ _ (S (S i))) (dummy _ _ (S (S (S i)))))) in
-    let y := (eval cbv beta in (f (dummy _ _ i))) in
-    let d := to_dummy' (S i) y in
-    let d0 := to_dummy' (S (S (S (S i)))) x in
-    let T := type of a in
-    lazymatch (eval pattern (dummy _ A i), (dummy _ (list A) (S i)), (dummy _ B (S (S i))) , (dummy _ T (S (S (S i)))) in d0) with
-    | ?g0 _ _ _ _ =>
-      lazymatch (eval pattern (dummy _ T i) in d) with
-      | ?g _ =>
-        constr:((@list_rec_nondep A, B, g, g0, l, a))
-      end
-    end
-  | _ => p
-  end.
-
-Ltac reconstruct' tree i :=
-  lazymatch tree with
-  | (pipe, ?init, ?f) =>
-    let x := (eval cbv beta in (f init)) in
-    reconstruct' x i
-  | (Eff ?e ?a, ?p) =>
-    let x := (eval cbv beta in (p (dummy _ _ i))) in
-    let p' := reconstruct' x (S i) in
-    lazymatch type of p with
-    | ?ty -> _ =>
-      let ty' := (eval cbv beta in ty) in
-      lazymatch (eval pattern (dummy _ ty' i) in p') with
-      | ?p'' _ =>
-        constr:(Eff e a p'')
-      end
-    end
-  | (@seq_abs ?A ?B ?eff ?args ?rets ?C _ ?step ?z ?state ?st, ?p) =>
-    let x := (eval cbv beta in (p (dummy _ _ i) (dummy _ _ (S i)))) in
-    let p' := reconstruct' x (S (S i)) in
-    lazymatch (eval pattern (dummy _ A i), (dummy _ state (S i)) in p') with
-    | ?p'' _ _ =>
-      constr:(@step_state A B _ _ eff args rets _ step st z p'')
-    end
-  | (@bind ?T ?T' ?eff ?args ?rets ?p, ?g) =>
-    let x := (eval cbv beta in (g (dummy _ _ i))) in
-    let q := reconstruct' x (S i) in
-    lazymatch (eval pattern (dummy _ T i) in q) with
-    | ?g' _ =>
-      constr:(@bind T T' eff args rets p g')
-    end
-  | (@sum_merge ?A ?B, ?fl, ?fr, ?o) =>
-    let xl := (eval cbv beta in (fl (dummy _ _ i))) in
-    let ql := reconstruct' xl (S i) in
-    let xr := (eval cbv beta in (fr (dummy _ _ i))) in
-    let qr := reconstruct' xr (S i) in
-    lazymatch (eval pattern (dummy _ A i) in ql) with
-    | ?pl' _ =>
-      lazymatch (eval pattern (dummy _ B i) in qr) with
-      | ?pr' _ => constr:(@sum_merge A B _ pl' pr' o)
-      end
-    end
-  | (@option_branch ?A ?B, ?f, ?f0, ?o) =>
-    let q := reconstruct' f0 i in
-    let x := (eval cbv beta in (f (dummy _ _ i))) in
-    let p' := reconstruct' x (S i) in
-    lazymatch (eval pattern (dummy _ A i) in p') with
-    | ?p'' _ =>
-      constr:(@option_branch A B p'' q o)
-    end
-  | (@prod_curry ?A ?B, ?f, ?o) =>
-    let x := (eval cbv beta in (f (dummy _ _ i) (dummy _ _ (S i)))) in
-    let q := reconstruct' x (S (S i)) in
-    lazymatch (eval pattern (dummy _ A i), (dummy _ B (S i)) in q) with
-    | ?p' _ _ =>
-      constr:(let (_a,_b) := o in p' _a _b)
-    end
-  | (@nat_rect_nondep ?A, ?f, ?f0, ?n, ?a) =>
-    let x := (eval cbv beta in (f (dummy _ _ i))) in
-    let y := (eval cbv beta in (f0 (dummy _ _ i) (dummy _ _ (S i)) (dummy _ _ (S (S i))))) in
-    let f' := reconstruct' x (S i) in
-    let f0' := reconstruct' y (S (S (S i))) in
-    (*    let ty := type of a in*)
-    lazymatch A with
-      ?ty -> _ =>
-      lazymatch (eval pattern (dummy _ ty i) in f') with
-      | ?f'' _ =>
-        lazymatch (eval pattern (dummy _ nat i), (dummy _ A (S i)), (dummy _ ty (S (S i))) in f0') with
-        | ?f0'' _ _ _ =>
-          constr:(@nat_rect_nondep A f'' f0'' n a)
-        end
-      end
-    end
-  | (@list_rec_nondep ?A, ?B, ?f, ?f0, ?l, ?a) =>
-    let x := (eval cbv beta in (f (dummy _ _ i))) in
-    let y := (eval cbv beta in (f0 (dummy _ _ i) (dummy _ _ (S i)) (dummy _ _ (S (S i))) (dummy _ _ (S (S (S i)))))) in
-    let f' := reconstruct' x (S i) in
-    let f0' := reconstruct' y (S (S (S (S i)))) in
-    let ty := type of a in
-    lazymatch (eval pattern (dummy _ ty i) in f') with
-    | ?f'' _ =>
-      lazymatch (eval pattern (dummy _ A i), (dummy _ (list A) (S i)), (dummy _ B (S (S i))), (dummy _ ty (S (S (S i)))) in f0') with
-      | ?f0'' _ _ _ _ =>
-        constr:(@list_rec_nondep A B f'' f0'' l a)
-      end
-    end
-  | _ => tree
-  end.
-
-Ltac coro_to_state' p :=
-  let x := to_dummy' 0 p in
-  lazymatch x with
-  | context [@coro_type ?A ?B ?C ?state ?step] =>
-    lazymatch (eval pattern (@coro_type A B C state step) in x) with
-    | ?F _ =>
-      let y := (eval cbv beta in (F state)) in
-      reconstruct' y 0
-    end
-  end.
-
-Ltac mid_eq_core' :=
-  discriminate
-  || dest_match
-  || proc_step
-  || apply eq_refl
-  || (progress (repeat match goal with
-                       | H : _ |- _ => apply H
-                       end);
-      ((simpl in *; congruence) || solve [eauto with foldable equivc] || solve [simpl; eauto]))
-  || generalize_and_ind
-  || lazymatch goal with
-       |- Eff ?e ?a ?f = Eff _ _ ?f0 =>
-       apply (@f_equal _ _ (fun x => Eff e a x) f f0);
-       let H := fresh in
-       extensionality H
-     | |- (_ <<- _ ; _) = (_ <<- _ ; _ ) =>
-       f_equal;
-       let H := fresh in
-       extensionality H
-     end
-  || eauto with foldable equivc.
-
 Definition main_loop_derive  :
-  { state & { step & forall fuel fuel' certs keys,
-                { init | @equiv _ _ _ _ state step init (main_loop fuel fuel' certs keys) } } }.
+  { state & { step & forall fuel fuel' fuel'' certs keys,
+                { init | @equiv _ _ _ _ state step init (main_loop fuel fuel' fuel'' certs keys) } } }.
 Proof.
   do 3 eexists.
-  Set Ltac Profiling.
-  
-  lazymatch goal with
-    |- equiv _ ?init ?x =>
-    let u := open_constr:(inl (tt,fuel,fuel',certs,keys)) in
-    unify init u;
-    let H := fresh in
-    assert (x = ltac:(let x' := eval red in x in
-                          let x'' := coro_to_state' x' in exact x''))
-  end.
-  unfold main_loop,pipe,sum_merge.
-  repeat mid_eq_core'.
-  rewrite H;
-    clear H;
-    unfold step_state.
-    repeat eexists;
-    [ dest_step
-    | unfold option_branch, sum_merge;
-      derive_core open_constr:(fun a => inr a) (tt,fuel,fuel',certs,keys) ].
-  all:lazymatch goal with
-    |- equiv' ?step _ _ (Return ?r) _ =>
-    (let ptr := next_ptr open_constr:(fun _x => _x) in
-     eapply (Equiv'Return step _ (ptr r));
-     simpl;
-     split;
-     lazymatch goal with
-       |- _ ?x = _ =>
-       pattern_rhs x;
-       eapply eq_refl
-     | _ => eapply eq_refl
-     end)
-    || (eapply (Equiv'Return step);
-        simpl;
-        split;
-        lazymatch goal with
-          |- _ ?x = _ =>
-          pattern_rhs x;
-          eapply eq_refl
-        | _ => eapply eq_refl
-        end)
-  end.
-
-  
-  (*derive (tt,fuel,fuel',certs,keys).*)
+  derive (tt,fuel,fuel',fuel'',certs,keys).
   Grab Existential Variables.
   all: exact inhabitant.
 Time Defined.
@@ -1903,7 +1504,7 @@ Extract Inductive AlertDescription => "I.AlertDescription"
   "I.NoApplicationProtocol"].
 Extract Constant ProtocolType => "I.ProtocolType".
 Extract Constant decodeRecord => "Helper.decodeRecord".
-Extract Constant decodeHeader => "\bs  -> case I.decodeHeader bs of Prelude.Right a -> GHC.Base.Just a ; _ -> GHC.Base.Nothing".
+Extract Constant decodeHeader' => "\bs  -> case I.decodeHeader bs of { Prelude.Right a -> Prelude.Right a ; Prelude.Left (T.Error_Protocol (_,_,al)) -> Prelude.Left al }".
 Extract Constant Certificate => "X.Certificate".
 Extract Constant CertificateChain => "X.CertificateChain".
 Extract Constant getCertificates => "\cch -> case cch of { X.CertificateChain certs -> Prelude.map X.getCertificate certs }".
@@ -1998,6 +1599,8 @@ Extract Constant Version_beq => "(Prelude.==)".
 Extract Constant Word64plus => "(Prelude.+)".
 Extract Constant extension_SupportedVersionsCH => "\exts -> case Helper.extensionLookup I.extensionID_SupportedVersions exts GHC.Base.>>= I.extensionDecode I.MsgTClientHello of {GHC.Base.Just (I.SupportedVersionsClientHello vers) -> GHC.Base.Just vers; _ -> GHC.Base.Nothing }".
 Extract Constant Word64max => "Prelude.max".
+Extract Constant CompressionID => "T.CompressionID".
+Extract Constant dummyCompressionID => "GHC.Base.undefined".
 
 Require Extraction.
 Extraction Language Haskell.

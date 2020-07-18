@@ -156,7 +156,7 @@ Ltac curry_lhs :=
 
 Ltac pattern_rhs term :=
   lazymatch goal with
-    |- _ = ?X =>
+    |- ?L = ?X =>
     let X' := (eval pattern term in X) in
     change X with X'
   end.
@@ -479,15 +479,36 @@ Proof.
   induction l; intros; simpl; auto.
 Qed.
 
+Definition option_branch A B (f:A -> B) f0 o :=
+  match o with
+  | Some a => f a
+  | None => f0
+  end.
+
 Lemma derive_opt : forall eff args rets A C D state (x : option A) sta st fa f opa op step P,
     (forall a, equiv' step P (sta a) (fa a) (opa a)) ->
     equiv' step P st f op ->
     @equiv' eff args rets C D state step P
-           (match x with Some a => sta a | None => st end)
-           (match x with Some a => fa a | None => f end)
-           (match x with Some a => opa a | None => op end).
+            (option_branch sta st x)
+            (match x with Some a => fa a | None => f end)
+            (option_branch opa op x).
 Proof.
   intros.
+  unfold option_branch.
+  destruct x; auto.
+Qed.
+
+
+Lemma derive_opt' : forall eff args rets A C D state (x : option A) sta st fa f opa op step P,
+    (forall a, equiv' step P (sta a) (fa a) (opa a)) ->
+    equiv' step P st f op ->
+    @equiv' eff args rets C D state step P
+            (option_branch sta st x)
+            (option_branch fa f x)
+            (option_branch opa op x).
+Proof.
+  intros.
+  unfold option_branch.
   destruct x; auto.
 Qed.
 
@@ -518,6 +539,23 @@ Lemma derive_sum : forall eff args rets A B C D state (x : A + B) fa fb sta stb 
              end).
 Proof.
   intros.
+  destruct x; auto.
+Qed.
+
+Lemma derive_sum' : forall eff args rets (A B C D:Set) state (x : A + B) fa fb sta stb opa opb step P,
+    (forall a, equiv' step P (sta a) (fa a) (opa a)) ->
+    (forall b, equiv' step P (stb b) (fb b) (opb b)) ->
+    @equiv' eff args rets C D state step P (match x with
+                                        | inl a => sta a
+                                        | inr b => stb b
+                                        end)
+            (sum_merge fa fb x)
+            (match x with
+             | inl a => opa a
+             | inr b => opb b
+             end).
+Proof.
+  intros.  unfold sum_merge.
   destruct x; auto.
 Qed.
 
@@ -845,7 +883,6 @@ Ltac derive_core ptr env :=
     ||
     lazymatch goal with
     |- equiv' ?step ?P _ ?prog _ =>
-    idtac "foo";
     lazymatch prog with
     | Def ?c ?p =>
       lazymatch c with
@@ -907,8 +944,32 @@ Ltac derive_core ptr env :=
         let ptr := next_ptr open_constr:(fun _x => _x) in
         derive_core ptr (env,b)
       ]
+    | (sum_merge _ _ ?x) =>
+      eapply (derive_sum' _ _ _ (fun _ => _) (fun _ => _) (fun _ => _) (fun _ => _));
+      [ let a := fresh in
+        intro a;
+        cbv beta;
+        let ptr := next_ptr open_constr:(fun _x => _x) in
+        derive_core ptr (env,a)
+      | let b := fresh in
+        intro b;
+        cbv beta;
+        let ptr := next_ptr open_constr:(fun _x => _x) in
+        derive_core ptr (env,b)
+      ]
     | (match ?x with Some _ => _ | None => _ end) =>
       eapply (derive_opt _ (fun _ => _) (fun _ => _) (fun _ => _));
+      [ let _a := fresh in
+        intro _a;
+        cbv beta;
+        let ptr := next_ptr open_constr:(fun _x => _x) in
+        derive_core ptr (env,_a)
+      | cbv beta;
+        let ptr := next_ptr open_constr:(fun _x => _x) in
+        derive_core ptr env
+      ]
+    | option_branch _ _ ?x =>
+      eapply (derive_opt' _ (fun _ => _) (fun _ => _) (fun _ => _));
       [ let _a := fresh in
         intro _a;
         cbv beta;
@@ -932,7 +993,6 @@ Ltac derive_core ptr env :=
       intros _a _b;
       derive_core ptr (env,_a,_b)
     | nat_rect_nondep _ _ _ _ =>
-      idtac "natrect";
       (eapply (derive_nat_rect _ _ (fun a b => _) (fun a => _) (fun a => _));
        [ let a := fresh in
          intro a;
@@ -1012,12 +1072,6 @@ Ltac opt_match_fun expr :=
     end
   end.
 
-Definition option_branch A B (f:A -> B) f0 o :=
-  match o with
-  | Some a => f a
-  | None => f0
-  end.
-
 Ltac sum_match_fun_l expr :=
   lazymatch expr with
   | (match ?o with inl _ => _ | inr _ => _ end) =>
@@ -1076,9 +1130,10 @@ Ltac to_dummy i p :=
   | @bind ?T ?T' ?eff ?args ?rets ?p ?f =>
     let x :=  (eval cbv beta in (f (dummy _ _ i))) in
     let d := to_dummy (S i) x in
+    let d' := to_dummy i p in
     lazymatch (eval pattern (dummy _ T i) in d) with
     | ?g _ =>
-      constr:((@bind T T' eff args rets p, g))
+      constr:((@bind T T' eff args rets, d', g))
     end
   | (match ?o with inl _ => _ | inr _ => _ end) =>
     let fl := sum_match_fun_l p in
@@ -1101,8 +1156,52 @@ Ltac to_dummy i p :=
         end
       end
     end
+  | sum_merge ?fl ?fr ?o =>
+    let ty := type of fl in
+    lazymatch ty with
+    | ?A -> _ =>
+      let ty' := type of fr in
+      lazymatch ty' with
+      | ?B -> _ =>
+        let xl := (eval cbv beta in (fl (dummy _ _ i))) in
+        let xr := (eval cbv beta in (fr (dummy _ _ i))) in
+        let dl := to_dummy (S i) xl in
+        let dr := to_dummy (S i) xr in
+        lazymatch (eval pattern (dummy _ A i) in dl) with
+        | ?gl _ =>
+          lazymatch (eval pattern (dummy _ B i) in dr) with
+          | ?gr _ => constr:((@sum_merge A B, gl, gr, o))
+          end
+        end
+      end
+    end
   | (match ?o with Some _ => _ | None => ?f0 end) =>
     let f := opt_match_fun p in
+    let ty := type of o in
+    lazymatch ty with
+    | option ?A =>
+      let B := type of p in
+      let x := (eval cbv beta in (f (dummy _ _ i))) in
+      let d := to_dummy (S i) x in
+      let d0 := to_dummy i f0 in
+      lazymatch (eval pattern (dummy _ A i) in d) with
+      | ?g _ =>
+        constr:((@option_branch A B, g, d0, o))
+      end
+    | _ =>
+      lazymatch (eval simpl in ty) with
+      | option ?A =>
+        let B := type of p in
+        let x := (eval cbv beta in (f (dummy _ _ i))) in
+        let d := to_dummy (S i) x in
+        let d0 := to_dummy i f0 in
+        lazymatch (eval pattern (dummy _ A i) in d) with
+        | ?g _ =>
+          constr:((@option_branch A B, g, d0, o))
+        end
+      end
+    end
+  | option_branch ?f ?f0 ?o =>
     let ty := type of o in
     lazymatch ty with
     | option ?A =>
@@ -1195,12 +1294,13 @@ Ltac reconstruct tree i :=
     | ?p'' _ _ =>
       constr:(@step_state A B _ _ eff args rets _ step st z p'')
     end
-  | (@bind ?T ?S ?eff ?args ?rets ?p, ?g) =>
+  | (@bind ?T ?T' ?eff ?args ?rets, ?p, ?g) =>
     let x := (eval cbv beta in (g (dummy _ _ i))) in
     let q := reconstruct x (S i) in
+    let q' := reconstruct p i in
     lazymatch (eval pattern (dummy _ T i) in q) with
     | ?g' _ =>
-      constr:(@bind T S eff args rets p g')
+      constr:(@bind T T' eff args rets q' g')
     end
   | (@sum_merge ?A ?B, ?fl, ?fr, ?o) =>
     let xl := (eval cbv beta in (fl (dummy _ _ i))) in
@@ -1291,7 +1391,6 @@ Ltac derive_coro env :=
   end;
   simpl;
    *)
-  unfold sum_merge;
   lazymatch goal with
     |- _ ?step ?init _ =>
     let u := open_constr:(inl env) in
@@ -1304,7 +1403,8 @@ Ltac derive_coro env :=
       |- equiv' ?step ?P _ (Return ?r) _ =>
       (let ptr := next_ptr open_constr:(fun x => x) in
        eapply (Equiv'Return _ _ (ptr r));
-       simpl;
+       unfold sum_merge;
+       cbv beta iota;
        split;
        lazymatch goal with
          |- _ ?x = _ =>
@@ -1313,7 +1413,8 @@ Ltac derive_coro env :=
        | _ => eapply eq_refl
        end)
       || (eapply Equiv'Return;
-          simpl;
+          unfold sum_merge;
+          cbv beta iota;
           split;
           lazymatch goal with
             |- _ ?x = _ =>
@@ -1440,12 +1541,14 @@ Definition ex_coroutine2 n : t (const_yield nat) (const_yield nat) unit :=
     | None => Return tt
     end.
 
+(*
 Lemma ex_coroutine2_derive :
   { state :Set & { step & { init | @equiv_coro _ _ _ _ _ state step init (ex_coroutine2) }}}.
   unfold ex_coroutine2, ex_coro'.
   do 3 eexists.
   unshelve derive_coro tt; exact inhabitant.
 Defined.
+*)
 
 Lemma GenForall2_nth_Some_list_equiv_coro :
   forall (A B:Set) (IA : Inhabit A) (IB : Inhabit B) state
@@ -1468,18 +1571,21 @@ Ltac generalize_and_ind :=
     |- nat_rect_nondep ?f ?f0 ?k (?a,?l) = nat_rect_nondep ?f' ?f0' _ (_,?l') =>
     lazymatch type of f with
     | context [@coro_type _ _ _ ?state ?step] =>
-      let x := fresh in
-      set (x := f);
       let x0 := fresh in
       set (x0 := f0);
-      let y := fresh in
-      set (y := f');
+      let x := fresh in
+      set (x := f);
       let y0 := fresh in
       set (y0 := f0');
+      let y := fresh in
+      set (y := f');
+      let H := fresh "__k" in
       cut (GenForall2 (fun (coro : coro_type step) (st : state) => equiv_coro step st coro) l l');
-      [ generalize l l' a; subst x; subst x0; subst y; subst y0
-       |unfold GenForall2; (solve [simpl; eauto with equivc] || (eexists; split; [reflexivity| solve [simpl; eauto with equivc]]))];
-      induction k; intros;
+      [ generalize l l' a;
+        generalize k as H;
+        subst x; subst x0; subst y; subst y0
+       |unfold GenForall2; (solve [simpl; eauto with foldable equivc] || (eexists; split; [reflexivity| solve [simpl; eauto with foldable equivc]]))];
+      induction H; intros;
       lazymatch goal with
         |- nat_rect_nondep ?f ?f0 _ _ = nat_rect_nondep ?f' ?f0' _ _ =>
         let tmp := fresh in
@@ -1590,11 +1696,25 @@ Ltac proc_step :=
 
 Ltac dest_match :=
   lazymatch goal with
-    |- match ?o with _ => _ end = option_branch _ _ ?o0 =>
+  | |- option_branch _ _ ?o = option_branch _ _ ?o0 =>
+    lazymatch o with
+    | ?o0 => destruct o eqn:?
+    | _ =>
+      destruct o eqn:?, o0 eqn:?;
+               [|try (exfalso; solve [eauto with foldable])..|];
+      unfold sum_merge
+    end
+  | |- sum_merge _ _ ?x = sum_merge _ _ ?y =>
+    lazymatch x with
+    | y => destruct x eqn:?
+    | _ => destruct x eqn:?, y eqn:?;
+                    [|try (exfalso; solve [eauto with foldable])..|];
+           unfold option_branch
+    end
+  | |- match ?o with _ => _ end = option_branch _ _ ?o0 =>
     destruct o eqn:?, o0 eqn:?;
-             [|try (exfalso; solve [eauto with foldable])..|];
-             unfold option_branch
-    
+         [|try (exfalso; solve [eauto with foldable])..|];
+    unfold option_branch
   | |- match ?x with _ => _ end = match ?y with _ => _ end =>
     lazymatch x with
     | y => destruct x eqn:?
@@ -1679,13 +1799,11 @@ Ltac derive' env :=
   lazymatch goal with
     |- equiv ?step ?init ?x =>
     let u := open_constr:(inl env) in
-    unfold sum_merge;
     simpl;
     unify init u;
     repeat eexists;
     [ dest_step
-    | unfold option_branch;
-      derive_core open_constr:(fun a => inr a) env];
+    | derive_core open_constr:(fun a => inr a) env];
     let ptr := next_ptr open_constr:(fun _x => _x) in
     lazymatch goal with
       |- equiv' ?step _ _ (Return ?r) _ =>
@@ -1770,15 +1888,14 @@ Ltac derive env :=
                           let x'' := coro_to_state x' in exact x''))
       as H by
          (change x with ltac:(let x0 := eval red in x in exact x0);
-            unfold pipe, sum_merge;
+            unfold pipe;
             repeat mid_eq_core);
     rewrite H;
     clear H;
     unfold step_state;
     repeat eexists;
     [ dest_step
-    | unfold option_branch, sum_merge;
-      derive_core open_constr:(fun a => inr a) env ]
+    | derive_core open_constr:(fun a => inr a) env ]
   | |- _ ?step ?init _ =>
     let u := open_constr:(inl env) in
     unify init u;
@@ -1794,11 +1911,11 @@ Ltac derive env :=
                             let x'' := coro_to_state x' in exact x''))
         as H by
             (change x with ltac:(let x0 := eval red in x in exact x0);
-             unfold pipe, sum_merge;
+             unfold pipe;
              repeat mid_eq_core);
       rewrite H;
       clear H;
-      unfold step_state, option_branch, sum_merge;
+      unfold step_state;
       derive_core open_constr:(fun _x => inr _x) (env,r)
     end
   end;
@@ -2093,6 +2210,44 @@ Lemma tree_ex_derive fuel :
 Proof.
   do 3 eexists.
   unshelve derive (tt,fuel); exact inhabitant.
+Defined.
+
+Definition tree_ex2 fuel fuel' : t args_effect rets_effect (option unit) :=
+  nat_rect_nondep
+    (fun _ => Return None)
+    (fun _ rec tr =>
+       key <- getStr;
+         k <- getN;
+         let oc := bsearch key tr : option (@coro_type nat nat _ _ _ ) in
+         match oc with
+         | None =>
+           pipe (ex_coroutine 0 : @coro_type nat nat _ _ ex_coroutine_step)
+                (fun c => rec (insert key c tr))
+         | Some c =>
+           nat_rect_nondep
+              (fun tr => Return None)
+              (fun _ rec_inner nc =>
+                 let (n,c) := (nc : nat * @coro_type nat nat _ _ ex_coroutine_step) in
+                 r <- resume c $ n;
+                   putN 0;
+                   if r =? 0 then
+                     let tr' := replace_map key c tr in
+                     rec tr'
+                   else
+                     rec_inner (S n, c))
+              fuel' (k,c)
+         end)
+    fuel (Leaf (@coro_type nat nat _ _ ex_coroutine_step)).
+
+
+Program Instance id_HasGenForall2 : HasGenForall2 (fun A:Set => A) :=
+  { GenForall2 := fun A1 A2 R => R }.
+
+Lemma tree_ex2_derive fuel fuel' :
+  {state & {step & {init | @equiv _ _ _ _ state step init (tree_ex2 fuel fuel')}}}.
+Proof.
+  do 3 eexists.
+  unshelve derive (tt,fuel,fuel'); exact inhabitant.
 Defined.
 
 Definition echo_loop fuel name s :

@@ -76,9 +76,6 @@ recordToPacket (Record ProtocolType_Handshake _ fragment) =
     Right a -> Just $ Handshake13 a
     Left _ -> Nothing
 
-test :: IORef Bool
-test = unsafePerformIO $ newIORef False
-
 decodeRecord :: Header -> Maybe (((Hash, Cipher), B.ByteString), Int) -> B.ByteString -> Either (AlertLevel, AlertDescription) Packet13
 decodeRecord header m msg =
   let rst =
