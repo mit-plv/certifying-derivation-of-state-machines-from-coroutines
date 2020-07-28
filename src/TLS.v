@@ -1667,7 +1667,7 @@ Extract Constant extensionRaw_KeyShare => "I.ExtensionRaw I.extensionID_KeyShare
 Extract Constant extensionRaw_SupportedVersions =>
 "I.ExtensionRaw I.extensionID_SupportedVersions".
 Extract Constant extension_SupportedGroups =>
-"\exts -> case Helper.extensionLookup I.extensionID_SupportedGroups exts GHC.Base.>>= I.extensionDecode I.MsgTClientHello".
+"\exts -> case Helper.extensionLookup I.extensionID_SupportedGroups exts GHC.Base.>>= I.extensionDecode I.MsgTClientHello of { GHC.Base.Just (I.NegotiatedGroups gs) -> GHC.Base.Just gs; _ -> GHC.Base.Nothing }".
 Extract Constant extension_KeyShare =>
 "(\exts -> case Helper.extensionLookup I.extensionID_KeyShare exts GHC.Base.>>= I.extensionDecode I.MsgTClientHello of { GHC.Base.Just (I.KeyShareClientHello kses) -> GHC.Base.return kses})".
 Extract Constant serverGroups => "Helper.serverGroups".

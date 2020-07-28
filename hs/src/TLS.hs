@@ -49,6 +49,12 @@ andb b1 b2 =
    GHC.Base.True -> b2;
    GHC.Base.False -> GHC.Base.False}
 
+negb :: GHC.Base.Bool -> GHC.Base.Bool
+negb b =
+  case b of {
+   GHC.Base.True -> GHC.Base.False;
+   GHC.Base.False -> GHC.Base.True}
+
 fst :: ((,) a1 a2) -> a1
 fst p =
   case p of {
@@ -997,6 +1003,21 @@ extension_SupportedVersionsCH :: (([]) ExtensionRaw) -> GHC.Base.Maybe
                                  (([]) Version)
 extension_SupportedVersionsCH = \exts -> case Helper.extensionLookup I.extensionID_SupportedVersions exts GHC.Base.>>= I.extensionDecode I.MsgTClientHello of {GHC.Base.Just (I.SupportedVersionsClientHello vers) -> GHC.Base.Just vers; _ -> GHC.Base.Nothing }
 
+clientKeySharesValid :: (([]) I.KeyShareEntry) -> (([]) T.Group) -> GHC.Base.Bool
+clientKeySharesValid ks gs =
+  case ks of {
+   [] -> GHC.Base.True;
+   (:) k ks' ->
+    case gs of {
+     [] -> GHC.Base.False;
+     (:) g gs' ->
+      case group_beq (ksGroup k) g of {
+       GHC.Base.True -> clientKeySharesValid ks' gs';
+       GHC.Base.False -> clientKeySharesValid ((:) k ks') gs'}}}
+
+extension_SupportedGroups :: (([]) ExtensionRaw) -> GHC.Base.Maybe (([]) T.Group)
+extension_SupportedGroups = \exts -> case Helper.extensionLookup I.extensionID_NegotiatedGroups exts GHC.Base.>>= I.extensionDecode I.MsgTClientHello of { GHC.Base.Just (I.NegotiatedGroups gs) -> GHC.Base.Just gs; _ -> GHC.Base.Nothing }
+
 type DoHandshake_state =
   Prelude.Either ((,) ((,) ((,) () GHC.Base.Int) CertificateChain) PrivateKey)
   (Prelude.Either ()
@@ -1241,34 +1262,44 @@ doHandshake_step x x0 =
                (,) a b ->
                 option_branch (\_ ->
                   option_branch (\x2 ->
-                    option_branch (\x3 ->
-                      option_branch (\x4 ->
-                        case x4 of {
-                         (,) a0 b0 ->
-                          case a0 of {
-                           (,) a1 b1 ->
-                            option_branch (\x5 -> Prelude.Right (Prelude.Right
-                              (Prelude.Right (Prelude.Left ((,) ((,) ((,) ((,) ((,)
-                              ((,) ((,) ((,) ((,) () c) p) a) b) x2) b0) a1) b1)
-                              x5))))) (Prelude.Right (Prelude.Left ()))
-                              (decodeGroupPublic (ksGroup b0) (ksData b0))}})
-                        (Prelude.Right (Prelude.Left ())) (GHC.Base.Just ((,) ((,)
-                        ((:) a []) b) x3)))
-                      (option_branch (\x3 ->
-                        case x3 of {
-                         (,) a0 b0 ->
-                          case a0 of {
-                           (,) a1 b1 ->
-                            option_branch (\x4 -> Prelude.Right (Prelude.Right
-                              (Prelude.Right (Prelude.Left ((,) ((,) ((,) ((,) ((,)
-                              ((,) ((,) ((,) ((,) () c) p) a) b) x2) b0) a1) b1)
-                              x4))))) (Prelude.Right (Prelude.Left ()))
-                              (decodeGroupPublic (ksGroup b0) (ksData b0))}})
-                        (Prelude.Right (Prelude.Left ())) GHC.Base.Nothing)
-                      (findKeyShare
-                        (case extension_KeyShare (chExt b) of {
-                          GHC.Base.Just kss -> kss;
-                          GHC.Base.Nothing -> []}) serverGroups)) (Prelude.Right
+                    case negb
+                           (clientKeySharesValid
+                             (case extension_KeyShare (chExt b) of {
+                               GHC.Base.Just kss -> kss;
+                               GHC.Base.Nothing -> []})
+                             (case extension_SupportedGroups (chExt b) of {
+                               GHC.Base.Just gs -> gs;
+                               GHC.Base.Nothing -> []})) of {
+                     GHC.Base.True -> Prelude.Right (Prelude.Left ());
+                     GHC.Base.False ->
+                      option_branch (\x3 ->
+                        option_branch (\x4 ->
+                          case x4 of {
+                           (,) a0 b0 ->
+                            case a0 of {
+                             (,) a1 b1 ->
+                              option_branch (\x5 -> Prelude.Right (Prelude.Right
+                                (Prelude.Right (Prelude.Left ((,) ((,) ((,) ((,)
+                                ((,) ((,) ((,) ((,) ((,) () c) p) a) b) x2) b0) a1)
+                                b1) x5))))) (Prelude.Right (Prelude.Left ()))
+                                (decodeGroupPublic (ksGroup b0) (ksData b0))}})
+                          (Prelude.Right (Prelude.Left ())) (GHC.Base.Just ((,) ((,)
+                          ((:) a []) b) x3)))
+                        (option_branch (\x3 ->
+                          case x3 of {
+                           (,) a0 b0 ->
+                            case a0 of {
+                             (,) a1 b1 ->
+                              option_branch (\x4 -> Prelude.Right (Prelude.Right
+                                (Prelude.Right (Prelude.Left ((,) ((,) ((,) ((,)
+                                ((,) ((,) ((,) ((,) ((,) () c) p) a) b) x2) b0) a1)
+                                b1) x4))))) (Prelude.Right (Prelude.Left ()))
+                                (decodeGroupPublic (ksGroup b0) (ksData b0))}})
+                          (Prelude.Right (Prelude.Left ())) GHC.Base.Nothing)
+                        (findKeyShare
+                          (case extension_KeyShare (chExt b) of {
+                            GHC.Base.Just kss -> kss;
+                            GHC.Base.Nothing -> []}) serverGroups)}) (Prelude.Right
                     (Prelude.Left ())) (chooseCipher (chCipherIDs b) serverCiphers))
                   (Prelude.Right (Prelude.Left ()))
                   (case extension_SupportedVersionsCH (chExt b) of {
@@ -1300,32 +1331,44 @@ doHandshake_step x x0 =
                (,) a b ->
                 option_branch (\_ ->
                   option_branch (\_ ->
-                    option_branch (\x2 ->
-                      option_branch (\x3 ->
-                        case x3 of {
-                         (,) _ b0 ->
-                          option_branch (\x4 -> GHC.Base.Just (ExistT __
-                            (GroupGetPubShared x4))) (GHC.Base.Just (ExistT __
-                            (CloseWith ((,) I.AlertLevel_Fatal
-                            I.IllegalParameter))))
-                            (decodeGroupPublic (ksGroup b0) (ksData b0))})
-                        (GHC.Base.Just (ExistT __ (CloseWith ((,) I.AlertLevel_Fatal
-                        I.IllegalParameter)))) (GHC.Base.Just ((,) ((,) ((:) a [])
-                        b) x2)))
-                      (option_branch (\x2 ->
-                        case x2 of {
-                         (,) _ b0 ->
-                          option_branch (\x3 -> GHC.Base.Just (ExistT __
-                            (GroupGetPubShared x3))) (GHC.Base.Just (ExistT __
-                            (CloseWith ((,) I.AlertLevel_Fatal
-                            I.IllegalParameter))))
-                            (decodeGroupPublic (ksGroup b0) (ksData b0))})
-                        (GHC.Base.Just (ExistT __ (CloseWith ((,) I.AlertLevel_Fatal
-                        I.IllegalParameter)))) GHC.Base.Nothing)
-                      (findKeyShare
-                        (case extension_KeyShare (chExt b) of {
-                          GHC.Base.Just kss -> kss;
-                          GHC.Base.Nothing -> []}) serverGroups)) (GHC.Base.Just
+                    case negb
+                           (clientKeySharesValid
+                             (case extension_KeyShare (chExt b) of {
+                               GHC.Base.Just kss -> kss;
+                               GHC.Base.Nothing -> []})
+                             (case extension_SupportedGroups (chExt b) of {
+                               GHC.Base.Just gs -> gs;
+                               GHC.Base.Nothing -> []})) of {
+                     GHC.Base.True -> GHC.Base.Just (ExistT __ (CloseWith ((,)
+                      I.AlertLevel_Fatal I.IllegalParameter)));
+                     GHC.Base.False ->
+                      option_branch (\x2 ->
+                        option_branch (\x3 ->
+                          case x3 of {
+                           (,) _ b0 ->
+                            option_branch (\x4 -> GHC.Base.Just (ExistT __
+                              (GroupGetPubShared x4))) (GHC.Base.Just (ExistT __
+                              (CloseWith ((,) I.AlertLevel_Fatal
+                              I.IllegalParameter))))
+                              (decodeGroupPublic (ksGroup b0) (ksData b0))})
+                          (GHC.Base.Just (ExistT __ (CloseWith ((,)
+                          I.AlertLevel_Fatal I.IllegalParameter)))) (GHC.Base.Just
+                          ((,) ((,) ((:) a []) b) x2)))
+                        (option_branch (\x2 ->
+                          case x2 of {
+                           (,) _ b0 ->
+                            option_branch (\x3 -> GHC.Base.Just (ExistT __
+                              (GroupGetPubShared x3))) (GHC.Base.Just (ExistT __
+                              (CloseWith ((,) I.AlertLevel_Fatal
+                              I.IllegalParameter))))
+                              (decodeGroupPublic (ksGroup b0) (ksData b0))})
+                          (GHC.Base.Just (ExistT __ (CloseWith ((,)
+                          I.AlertLevel_Fatal I.IllegalParameter))))
+                          GHC.Base.Nothing)
+                        (findKeyShare
+                          (case extension_KeyShare (chExt b) of {
+                            GHC.Base.Just kss -> kss;
+                            GHC.Base.Nothing -> []}) serverGroups)}) (GHC.Base.Just
                     (ExistT __ (CloseWith ((,) I.AlertLevel_Fatal
                     I.HandshakeFailure))))
                     (chooseCipher (chCipherIDs b) serverCiphers)) (GHC.Base.Just
@@ -4900,7 +4943,7 @@ parseHandshake :: ((,) HandshakeType ByteString) -> Prelude.Either
 parseHandshake = Helper.parseHandshake
 
 maxCiphertextSize :: GHC.Base.Int
-maxCiphertextSize = 16384 Prelude.+ 256
+maxCiphertextSize = 16384
 
 isRecvPacket :: Args_tls -> GHC.Base.Maybe RecvType
 isRecvPacket p =
