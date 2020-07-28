@@ -1,4 +1,4 @@
-{-# LANGUAGE BangPatterns, OverloadedStrings #-}
+{-# LANGUAGE BangPatterns, OverloadedStrings, FlexibleContexts #-}
 
 module Helper where
 
@@ -10,6 +10,7 @@ import Data.List
 import Data.Maybe
 import Data.IORef
 import System.IO.Unsafe (unsafePerformIO)
+import Control.Monad.State.Strict
 import qualified Data.X509 as X
 import qualified Crypto.PubKey.RSA as RSA
 import qualified Crypto.PubKey.RSA.PSS as PSS
@@ -17,6 +18,8 @@ import qualified Crypto.Hash.Algorithms as A
 import qualified Crypto.Hash as H
 import Certificate
 import Encrypt (newRecordOptions)
+import Debug.Trace
+import Data.ByteString.Builder (toLazyByteString, byteStringHex)
 
 sniExt :: ExtensionRaw
 sniExt = ExtensionRaw extensionID_ServerName ""
@@ -60,7 +63,7 @@ extensionLookup :: ExtensionID -> [ExtensionRaw] -> Maybe B.ByteString
 extensionLookup toFind = fmap (\(ExtensionRaw _ content) -> content)
                        . find (\(ExtensionRaw eid _) -> eid == toFind)
 
-supportedGroups' = [P256,P384,P521,X25519]
+supportedGroups' = [X25519,X448,P256,FFDHE3072,FFDHE4096,P384,FFDHE6144,FFDHE8192,P521,FFDHE2048]
 
 serverGroups :: ([]) Group
 serverGroups =
@@ -68,15 +71,53 @@ serverGroups =
 
 defaultCertChain pubKey = X.CertificateChain [simpleX509 $ PubKeyRSA pubKey]
 
-recordToPacket :: Record Plaintext -> Maybe Packet13
-recordToPacket (Record ProtocolType_ChangeCipherSpec _ _) = Just ChangeCipherSpec13
-recordToPacket (Record ProtocolType_AppData _ fragment) = Just $ AppData13 $ fragmentGetBytes fragment
-recordToPacket (Record ProtocolType_Handshake _ fragment) =
-  case decodeHandshakes13 $ fragmentGetBytes fragment of
-    Right a -> Just $ Handshake13 a
-    Left _ -> Nothing
+parseHandshakeRecord :: Maybe (GetContinuation (HandshakeType13, B.ByteString)) -> B.ByteString -> GetResult (HandshakeType13, B.ByteString)
+parseHandshakeRecord mcont bs = fromMaybe decodeHandshakeRecord13 mcont bs
 
-decodeRecord :: Header -> Maybe (((Hash, Cipher), B.ByteString), Int) -> B.ByteString -> Either (AlertLevel, AlertDescription) Packet13
+parseHandshake :: (HandshakeType13, B.ByteString) -> Either (AlertLevel, AlertDescription) Handshake13
+parseHandshake (ty, bs) = either (Left . errorToAlert) Right $ decodeHandshake13 ty bs
+
+errorToAlert :: TLSError -> (AlertLevel, AlertDescription)
+errorToAlert (Error_Protocol (_, _, ad))   = (AlertLevel_Fatal, ad)
+errorToAlert (Error_Packet_unexpected _ _) = (AlertLevel_Fatal, UnexpectedMessage)
+errorToAlert (Error_Packet_Parsing _)      = (AlertLevel_Fatal, DecodeError)
+errorToAlert _                             = (AlertLevel_Fatal, InternalError)
+
+--decodeRecord :: Header -> Maybe (((Hash, Cipher), B.ByteString), Int) -> B.ByteString -> Either (AlertLevel, AlertDescription) Packet13
+--decodeRecord mcont header m msg =
+--  let rst =
+--        case m of
+--          Nothing -> newRecordState
+--          Just (((h,cipher),secret), sn)->
+--            let bulk    = cipherBulk cipher
+--                keySize = bulkKeySize bulk
+--                ivSize  = max 8 (bulkIVSize bulk + bulkExplicitIV bulk)
+--                key = hkdfExpandLabel h secret "key" "" keySize
+--                iv  = hkdfExpandLabel h secret "iv"  "" ivSize
+--                cst = CryptState {
+--                    cstKey       = bulkInit bulk BulkDecrypt key
+--                  , cstIV        = iv
+--                  , cstMacSecret = secret
+--                  }
+--            in
+--            RecordState {
+--                  stCryptState  = cst
+--                , stMacState    = MacState { msSequence = fromIntegral sn }
+--                , stCipher      = Just cipher
+--                , stCompression = nullCompression
+--                }
+--  in
+--  if B.length msg > 16384 then
+--    Left (AlertLevel_Fatal, RecordOverflow)
+--  else
+--    case runRecordM (decodeRecordM' header msg) newRecordOptions rst of
+--      Left err -> Left $ errorToAlert err
+--      Right (a,_) ->
+--        case recordToPacket a of
+--          Right p -> Right p
+--          Left err -> Left $ errorToAlert err
+
+decodeRecord :: Header -> Maybe (((Hash, Cipher), B.ByteString), Int) -> B.ByteString -> Either AlertDescription (ProtocolType, B.ByteString)
 decodeRecord header m msg =
   let rst =
         case m of
@@ -100,13 +141,39 @@ decodeRecord header m msg =
                 , stCompression = nullCompression
                 }
   in
-  if B.length msg > 16384 then
-    Left (AlertLevel_Fatal, RecordOverflow)
+  if B.length msg > 16384 + 256 then
+    Left RecordOverflow
   else
-    case runRecordM (decodeRecordM header msg) newRecordOptions rst of
-      Left _ -> Left (AlertLevel_Fatal, BadRecordMac)
-      Right (a,_) ->
-        case recordToPacket a of
-          Just p -> Right p
-          Nothing -> Left (AlertLevel_Fatal, DecodeError)
+    case runRecordM (decodeRecordM' header msg) newRecordOptions rst of
+      Left err -> Left $ snd $ errorToAlert err
+      Right (Record ty _ fragment,_) -> Right (ty, fragmentGetBytes fragment)
+
+decodeRecordM' :: Header -> B.ByteString -> RecordM (Record Plaintext)
+decodeRecordM' header content = disengageRecord' erecord
+   where
+     erecord = rawToRecord header (fragmentCiphertext content)
     
+disengageRecord' :: Record Ciphertext -> RecordM (Record Plaintext)
+disengageRecord' = decryptRecord >=> uncompressRecord
+
+decryptRecord :: Record Ciphertext -> RecordM (Record Compressed)
+decryptRecord record@(Record ct ver fragment) = do
+    st <- get
+    case stCipher st of
+        Nothing -> noDecryption
+        _       -> do
+            recOpts <- getRecordOptions
+            let mver = recordVersion recOpts
+            if recordTLS13 recOpts
+                then decryptData13 mver (fragmentGetBytes fragment) st
+                else onRecordFragment record $ fragmentUncipher $ \e ->
+                        decryptData mver record e st
+  where
+    noDecryption = onRecordFragment record $ fragmentUncipher return
+    decryptData13 mver e st
+        | ct == ProtocolType_AppData = do
+            inner <- decryptData mver record e st
+            case unInnerPlaintext inner of
+                Left message   -> throwError $ Error_Protocol (message, True, UnexpectedMessage)
+                Right (ct', d) -> return $ Record ct' ver (fragmentCompressed d)
+        | otherwise = throwError $ Error_Protocol ("not encrypted", True, UnexpectedMessage)

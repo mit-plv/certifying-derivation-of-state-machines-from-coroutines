@@ -32,7 +32,7 @@ main = withSocketsDo $ do
       sock <- socket AF_INET Stream 0
       bind sock (SockAddrInet 4433 iNADDR_ANY)  
       listen sock 2
-      forkIO (core [] (Left ((((((),10000), 10000), 10000), cert), priv)) Receive (unsafeCoerce ()) newAccepts received )
+      forkIO (core [] (Left ((((((),100000), 100000), 100000), cert), priv)) Receive (unsafeCoerce ()) newAccepts received )
       forever $ do
         (s,a) <- accept sock
         modifyIORef newAccepts $ \l -> (s,show a):l
@@ -53,7 +53,7 @@ core sock x ef (r::Any) newAccepts received = do
         Accept -> do
           l <- readIORef newAccepts
           case l of
-            [] -> threadDelay 100000 >> core sock next Accept (unsafeCoerce Nothing) newAccepts received 
+            [] -> threadDelay 10000 >> core sock next Accept (unsafeCoerce Nothing) newAccepts received 
             (s,adr):l' -> do
               writeIORef newAccepts l'
               putStrLn $ " accepted" ++ show adr
@@ -78,7 +78,7 @@ core sock x ef (r::Any) newAccepts received = do
               putStrLn "RecvData"
               case lookup adr sock of
                 Just s -> do
-                  forkIO $ SB.recv s 16384 >>= \ch -> putMVar received (adr, FromRecvData ch)
+                  forkIO $ SB.recv s (16384 + 256) >>= \ch -> putMVar received (adr, FromRecvData ch)
                   return ()
                 Nothing -> error "no socket"
             GetRandomBytes a' ->
@@ -86,9 +86,8 @@ core sock x ef (r::Any) newAccepts received = do
             SendData a' ->
               case lookup adr sock of
                 Just s -> do
-                  putStrLn "SendPacket"
                   let (pkt,m) = a' :: (I.Packet13, Maybe (((TLS.Hash,TLS.Cipher),B.ByteString),Int))
-                  putStrLn $ show pkt
+                  putStrLn $ "SendPacket " ++ show pkt
                   let encoded =
                         case pkt of
                           I.Handshake13 [hs] -> I.encodeHandshake13 hs
@@ -102,8 +101,8 @@ core sock x ef (r::Any) newAccepts received = do
               I.groupGetPubShared a' >>= \p -> forkIO (putMVar received ((adr,(FromGroupGetPubShared p)))) >> return ()
             MakeCertVerify a' ->
               makeCertVerify a' >>= \c -> forkIO (putMVar received ((adr,(FromMakeCertVerify c)))) >> return ()
-            Close a' -> do
-              putStrLn "Close"
+            CloseWith a' -> do
+              putStrLn $ "Close" ++ show a'
               case lookup adr sock of
                 Just s -> close s >> core (delete (adr,s) sock) next Perform (unsafeCoerce ()) newAccepts received
             GetCurrentTime a' -> do
@@ -112,7 +111,7 @@ core sock x ef (r::Any) newAccepts received = do
               
 
           case ea of
-            Close _ -> return ()
+            CloseWith _ -> return ()
             _ -> core sock next Perform (unsafeCoerce ()) newAccepts received 
 
 recvBytes :: Socket -> Int -> IO B.ByteString
@@ -158,7 +157,7 @@ recvCCS sock = do
     Right (I.Record ProtocolType_ChangeCipherSpec _ _) -> return ()
     _ -> putStrLn "error"
 
-recvHandshakes :: Socket -> Maybe ((TLS.Hash,TLS.Cipher), B.ByteString) ->  IO (Either TLSError [I.Handshake13])
+recvHandshakes :: Socket -> Maybe ((TLS.Hash,TLS.Cipher), B.ByteString) ->  IO (Either I.TLSError [I.Handshake13])
 recvHandshakes sock m = do
   erecord <- recvRecord sock m
   case erecord of
@@ -167,7 +166,7 @@ recvHandshakes sock m = do
         return $ I.decodeHandshakes13 $ I.fragmentGetBytes fragment
     Right p -> print p >> return (Right [])
 
-recvRecord :: Socket -> Maybe ((TLS.Hash,TLS.Cipher), B.ByteString) -> IO (Either TLSError (I.Record I.Plaintext))
+recvRecord :: Socket -> Maybe ((TLS.Hash,TLS.Cipher), B.ByteString) -> IO (Either I.TLSError (I.Record I.Plaintext))
 recvRecord sock m = recvBytes sock 5 >>= recvLengthE . I.decodeHeader
   where recvLengthE = either (return . Left) recvLength
         recvLength header@(Header _ _ readlen)
@@ -201,7 +200,7 @@ recvRecord sock m = recvBytes sock 5 >>= recvLengthE . I.decodeHeader
                             Left err -> return $ Left err
                             Right (a,_) -> return $ Right a
 
-maximumSizeExceeded :: TLSError
+maximumSizeExceeded :: I.TLSError
 maximumSizeExceeded = Error_Protocol ("record exceeding maximum size", True, RecordOverflow)
 
 

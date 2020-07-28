@@ -111,6 +111,9 @@ Parameter KeyUpdate : Set.
 Parameter Certificate CertificateChain : Set.
 Parameter Signature : Set.
 
+Inductive RecvType := RFinished | RClientHello | RAppData | RCCS.
+
+Scheme Equality for RecvType.
 
 Inductive CServerRandom := SR : ByteString -> CServerRandom.
 Inductive CClientRandom := CRn : ByteString -> CClientRandom.
@@ -182,9 +185,9 @@ Record ClientHelloMsg :=
     chExt : list ExtensionRaw
   }.
                  
-Definition clientHello (h : CPacket) :=
+Definition clientHello (h : CHandshake) :=
   match h with
-  | PHandshake [HClientHello v (CRn rand) sess cipherIDs ext] =>
+  | HClientHello v (CRn rand) sess cipherIDs ext =>
     Some {| chVersion:=v; chRand:=rand; chSess:=sess; chCipherIDs:=cipherIDs; chExt:=ext |}
   | _ => None
   end.
@@ -259,6 +262,8 @@ Parameter extensionEncode_SupportedVersions : Version -> ByteString.
 Parameter TLS13 : Version.
 Parameter extensionRaw_KeyShare : ByteString -> ExtensionRaw.
 Parameter extensionRaw_SupportedVersions : ByteString -> ExtensionRaw.
+Parameter extensionLookup_SignatureAlgorithms : list ExtensionRaw -> option ByteString.
+Parameter extensionDecode_SignatureAlgorithms : ByteString -> option (list HashAndSignatureAlgorithm).
 Parameter extension_SignatureAlgorithms : list ExtensionRaw -> option (list (HashAndSignatureAlgorithm)).
 
 
@@ -407,7 +412,7 @@ Inductive args_tls :=
 | setPSK : String.string * SessionData -> args_tls
 | sessionResume : String.string -> args_tls
 | getCurrentTime : unit -> args_tls
-| close : unit -> args_tls
+| closeWith : AlertLevel * AlertDescription -> args_tls
 | sendData : CPacket * option (Hash * Cipher * ByteString * nat) -> args_tls
 | getRandomBytes : nat -> args_tls
 | recvData : unit -> args_tls
@@ -415,7 +420,7 @@ Inductive args_tls :=
 | makeCertVerify : PublicKey * PrivateKey * HashAndSignatureAlgorithm * ByteString -> args_tls
 | setSecret : Hash * Cipher * ByteString * bool -> args_tls
 | sendPacket : CPacket -> args_tls
-| recvPacket : unit + unit + unit + unit -> args_tls.
+| recvPacket : RecvType -> args_tls.
 
 Inductive rets_tls :=
 | RetAlert : AlertLevel * AlertDescription -> rets_tls
@@ -543,16 +548,16 @@ Notation "r <- 'yield' 'GetCurrentTime' $ a ; p" :=
        (at level 100, right associativity).
 
 Notation "r <- 'yield' 'Close' $ a ; p" :=
-  (Eff yield (close a)
+  (Eff yield (closeWith a)
        (fun r => p))
     (at level 100, right associativity).
 
-Notation "r <- 'yield' 'RecvClientHello' $ a ; p" :=
-  (Eff yield (recvPacket (inr a))
+Notation "r <- 'yield' 'RecvClientHello' ; p" :=
+  (Eff yield (recvPacket RClientHello)
        (fun r' => option_branch
                     (fun r => p)
-                    (option_branch (fun al => Eff yield (sendPacket (PAlert [al]))
-                                                  (fun _ => _ <- yield Close $ tt; Return inhabitant))
+                    (option_branch (fun al => Eff yield (closeWith al)
+                                                  (fun _ => Return inhabitant))
                                    (Return inhabitant) (retAlert r'))
                     (fromRecvClientHello r')))
        (at level 100, right associativity).
@@ -561,38 +566,38 @@ Notation "r <- 'yield' 'RecvData' $ a ; p" :=
   (Eff yield (recvData a)
        (fun r' => option_branch
                     (fun r => p)
-                    (option_branch (fun al => Eff yield (sendPacket (PAlert [al]))
-                                                  (fun _ => _ <- yield Close $ tt; Return inhabitant))
+                    (option_branch (fun al => Eff yield (closeWith al)
+                                                  (fun _ => Return inhabitant))
                                    (Return inhabitant) (retAlert r'))
                     (fromRecvData r')))
     (at level 100, right associativity).
 
-Notation "r <- 'yield' 'RecvFinished' $ a ; p" :=
-  (Eff yield (recvPacket (inl (inl (inr a))))
+Notation "r <- 'yield' 'RecvFinished' ; p" :=
+  (Eff yield (recvPacket RFinished)
        (fun r' => option_branch
                     (fun r => p)
-                    (option_branch (fun al => Eff yield (sendPacket (PAlert [al]))
-                                                  (fun _ => _ <- yield Close $ tt; Return inhabitant))
+                    (option_branch (fun al => Eff yield (closeWith al)
+                                                  (fun _ => Return inhabitant))
                                    (Return inhabitant) (retAlert r'))
                     (fromRecvFinished r')))
     (at level 100, right associativity).
 
-Notation "r <- 'yield' 'RecvCCS' $ a ; p" :=
-  (Eff yield (recvPacket (inl (inr a)))
+Notation "r <- 'yield' 'RecvCCS' ; p" :=
+  (Eff yield (recvPacket RCCS)
        (fun r' => option_branch
                     (fun r => p)
-                    (option_branch (fun al => Eff yield (sendPacket (PAlert [al]))
-                                                  (fun _ => _ <- yield Close $ tt; Return inhabitant))
+                    (option_branch (fun al => Eff yield (closeWith al)
+                                                  (fun _ => Return inhabitant))
                                    (Return inhabitant) (retAlert r'))
                     (fromRecvCCS r')))
     (at level 100, right associativity).
 
-Notation "r <- 'yield' 'RecvAppData' $ a ; p" :=
-  (Eff yield (recvPacket (inl (inl (inl a))))
+Notation "r <- 'yield' 'RecvAppData' ; p" :=
+  (Eff yield (recvPacket RAppData)
        (fun r' => option_branch
                     (fun r => p)
-                    (option_branch (fun al => Eff yield (sendPacket (PAlert [al]))
-                                                  (fun _ => _ <- yield Close $ tt; Return inhabitant))
+                    (option_branch (fun al => Eff yield (closeWith al)
+                                                  (fun _ => Return inhabitant))
                                    (Return inhabitant) (retAlert r'))
                     (fromRecvAppData r')))
     (at level 100, right associativity).
@@ -627,7 +632,7 @@ Instance sigT_rets_inhabit : Inhabit rets_tls :=
   { inhabitant := FromSetPSK }.
 
 Instance sigT_args_inhabit : Inhabit args_tls :=
-  { inhabitant := close tt }.
+  { inhabitant := getCurrentTime tt }.
 
 Parameter ProtocolType : Set.
 Inductive Header := header : ProtocolType -> Version -> nat -> Header.
@@ -637,8 +642,6 @@ Definition hdReadLen hd :=
   | header _ _ n => n
   end.
 
-Parameter decodeHeader : ByteString -> AlertDescription + Header.
-Parameter decodeRecord : Header -> option (Hash * Cipher * ByteString * nat) -> ByteString -> AlertLevel * AlertDescription + CPacket.
 Parameter Bsplit :  nat -> ByteString -> ByteString * ByteString.
 
 Notation "x <~ 'ifSome' o {{ q }} p" :=
@@ -799,8 +802,7 @@ Parameter extensionEncode_SupportedVersionsServerHello : Version -> ByteString.
 
 Definition doHelloRetryRequest chEncoded' ch hash cipher
   : t (const_yield args_tls) (const_yield rets_tls) (option (list ByteString * ClientHelloMsg * KeyShare)) :=
-  Def (fun al => (_ <- yield SendPacket $ PAlert [(Alert_Fatal, al)];
-                 _ <- yield Close $ tt;
+  Def (fun al => (_ <- yield Close $ (Alert_Fatal, al);
                  Return None) : t (const_yield args_tls) (const_yield rets_tls) (option (list ByteString * ClientHelloMsg * KeyShare))) (fun alert =>
   let chHashed := hashWith hash [chEncoded'] in
 
@@ -812,8 +814,7 @@ Definition doHelloRetryRequest chEncoded' ch hash cipher
   in
   let possibleGroups := intersect serverGroups clientGroups in
   match hd_error possibleGroups with
-  | None => _ <- yield SendPacket $ (PAlert [(Alert_Fatal, HandshakeFailure)]);
-            _ <- yield Close $ tt; Return None
+  | None => alert HandshakeFailure
   | Some g =>
     let serverKeyShare := extensionEncode_KeyShareHRR g in
     let selectedVersion := extensionEncode_SupportedVersionsServerHello TLS13 in
@@ -823,23 +824,16 @@ Definition doHelloRetryRequest chEncoded' ch hash cipher
     let hrr := HServerHello hrrRandom ch.(chSess) (cipherID cipher) extensions in
     _ <- yield SendPacket $ PHandshake [hrr];
     _ <- yield SendPacket $ PChangeCipherSpec;
-    d <- yield RecvClientHello $ tt;
+    d <- yield RecvClientHello;
     let (chEncoded, chnew) := (d : ByteString * ClientHelloMsg) in
     let transcript := [messageHash00; natToBytes (Blength chHashed); chHashed; chEncoded] in
     keyShares <~ ifSome extension_KeyShare chnew.(chExt)
-      {{ _ <- yield SendPacket $ (PAlert [(Alert_Fatal, IllegalParameter)]);
-         _ <- yield Close $ tt;
-         Return None
-      }}
+      {{ alert IllegalParameter }}
     match hd_error keyShares with
-    | None => _ <- yield SendPacket $ (PAlert [(Alert_Fatal, IllegalParameter)]);
-              _ <- yield Close $ tt;
-              Return None
+    | None => alert IllegalParameter
     | Some keyShare =>
       if negb (Group_beq g keyShare.(ksGroup)) then
-        _ <- yield SendPacket $ (PAlert [(Alert_Fatal, IllegalParameter)]);
-        _ <- yield Close $ tt;
-        Return None
+        alert IllegalParameter
       else
         Return (Some (transcript, chnew, keyShare))
     end
@@ -849,13 +843,25 @@ Parameter extension_SupportedVersionsCH : list ExtensionRaw -> option (list Vers
 Parameter bytes2w32 : ByteString -> Word32.
 Parameter life : Word32.
 
+Fixpoint clientKeySharesValid ks gs :=
+  match ks,gs with
+  | k::ks',g::gs' =>
+    if Group_beq (ksGroup k) g then
+      clientKeySharesValid ks' gs'
+    else
+      clientKeySharesValid (k::ks') gs'
+  | [],_ => true
+  | _,[] => false
+  end.
+
+Parameter extension_SupportedGroups : list ExtensionRaw -> option (list Group).
+
 Definition doHandshake (fuel:nat) (cch: CertificateChain)(pr: PrivateKey)(_: rets_tls)
   : t (const_yield args_tls) (const_yield rets_tls) unit :=
-  Def (fun al => _ <- yield SendPacket $ PAlert [(Alert_Fatal, al)];
-                 _ <- yield Close $ tt;
+  Def (fun al => _ <- yield Close $ (Alert_Fatal, al);
                  Return tt) (fun alert =>
   let certs := getCertificates cch in
-  d' <- yield RecvClientHello $ tt;
+  d' <- yield RecvClientHello;
   let (chEncoded, se) := (d' : ByteString * ClientHelloMsg) in
   let sess := chSess se in
   let chExts := chExt se in
@@ -880,8 +886,17 @@ Definition doHandshake (fuel:nat) (cch: CertificateChain)(pr: PrivateKey)(_: ret
       | Some kss => kss
       end
   in
+  let cSupportedGroups :=
+      match extension_SupportedGroups chExts with
+      | None => []
+      | Some gs => gs
+      end
+  in
+  if negb (clientKeySharesValid keyShares cSupportedGroups) then
+    alert IllegalParameter
+  else
   o <<- match findKeyShare keyShares serverGroups with
-        | None => Return None (* doHelloRetryRequest chEncoded se usedHash cipher*)
+        | None => Return None(*doHelloRetryRequest chEncoded se usedHash cipher*)
         | Some keyShare =>
           Return (Some ([chEncoded], se, keyShare))
         end;
@@ -894,9 +909,7 @@ Definition doHandshake (fuel:nat) (cch: CertificateChain)(pr: PrivateKey)(_: ret
     {{ alert IllegalParameter }}
   mecdhePair <- yield GroupGetPubShared $ cpub;
   ecdhePair <~ ifSome mecdhePair
-    {{ alert IllegalParameter (*_ <- yield SendPacket $ (PAlert [(Alert_Fatal, IllegalParameter)]);
-(*       _ <- yield Close $ tt;*)
-       Return tt *) }}
+    {{ alert IllegalParameter }}
   let wspub := encodeGroupPublic (fst ecdhePair) in
   let ecdhe := ba_convert (snd ecdhePair) in
   let serverKeyShare := {| ksGroup := ksGroup keyShare; ksData := wspub |} in
@@ -927,6 +940,14 @@ Definition doHandshake (fuel:nat) (cch: CertificateChain)(pr: PrivateKey)(_: ret
   let extensions' :=
       extensionRaw_KeyShare ks :: extensionRaw_SupportedVersions selectedVersion  :: extensions
   in
+  ohashSigs <<- _ <~ ifSome binderInfo
+            {{ bs <~ ifSome extensionLookup_SignatureAlgorithms chExts
+                  {{ _ <- yield Close $ (Alert_Fatal, MissingExtension);
+                     Return None }}
+               hashSigs <~ ifSome extensionDecode_SignatureAlgorithms bs
+               {{ _ <- yield Close $ (Alert_Fatal, DecodeError); Return None }}
+               Return (Some hashSigs)  }}
+            Return None;
   srand <- yield GetRandomBytes $ 32;
   shEncoded <- yield SendPacket $
             (PHandshake [HServerHello (SR srand) sess (cipherID cipher) extensions']);
@@ -945,17 +966,11 @@ Definition doHandshake (fuel:nat) (cch: CertificateChain)(pr: PrivateKey)(_: ret
              (PHandshake [HEncryptedExtensions eExts]);
   let sendCertAndVerify :=
       let transcript := (transcript' ++ [shEncoded; extEncoded])%list in
-      match binderInfo with
-      | Some _ => Return (Some transcript)
-      | None =>
-        hashSigs <~ ifSome extension_SignatureAlgorithms chExts
-          {{ _ <- yield SendPacket $ PAlert [(Alert_Fatal, MissingExtension)];
-             _ <- yield Close $ tt;
-             Return None }}
+      match ohashSigs with
+      | None => Return (Some transcript)
+      | Some hashSigs =>
         pubhs <~ ifSome decideCredInfo pr certs hashSigs
-          {{ _ <- yield SendPacket $ (PAlert [(Alert_Fatal,HandshakeFailure)]);
-             _ <- yield Close $ tt;
-             Return None }}
+          {{ _ <- yield Close $ (Alert_Fatal, HandshakeFailure); Return None }}
         let (pub,hashSig) := pubhs : PublicKey * HashAndSignatureAlgorithm in
         certEncoded <- yield SendPacket $
                     (PHandshake [HCertificate empty cch [[]]]);
@@ -976,15 +991,15 @@ Definition doHandshake (fuel:nat) (cch: CertificateChain)(pr: PrivateKey)(_: ret
   let applicationSecret := hkdfExtract usedHash (hkdfExpandLabel usedHash handshakeSecret (s2b "derived") (hashWith usedHash [s2b ""]) hsize) zero in
   let clientApplicationSecret := hkdfExpandLabel usedHash applicationSecret (s2b "c ap traffic") hashed'' hsize in
   let serverApplicationSecret := hkdfExpandLabel usedHash applicationSecret (s2b "s ap traffic") hashed'' hsize in
+  _ <- yield SetSecret $ (usedHash, cipher, serverApplicationSecret, false);
 
   _ <- yield SetSecret $ (usedHash, cipher, clientHandshakeSecret, true);
-  fin <- yield RecvFinished $ tt;
+  fin <- yield RecvFinished;
   cfRecvTime <- yield GetCurrentTime $ tt;
 
   (* calculate application secrets *)
   let hashed''' := hashWith (cipherHash cipher) (transcript ++ [finEncoded; encodeHandshake13 (HFinished fin)]) in
   let resumptionMasterSecret := hkdfExpandLabel usedHash applicationSecret (s2b "res master") hashed''' hsize in
-  _ <- yield SetSecret $ (usedHash, cipher, serverApplicationSecret, false);
   _ <- yield SetSecret $ (usedHash, cipher, clientApplicationSecret, true);
   if ByteString_beq fin (makeVerifyData usedHash clientHandshakeSecret hashed'') then (*
     b <- yield GetRandomBytes $ 36;
@@ -1011,9 +1026,9 @@ Definition doHandshake (fuel:nat) (cch: CertificateChain)(pr: PrivateKey)(_: ret
                             sessionFlags := []
                          |});
     _ <- yield SendPacket $ pac; *)
-    data <- yield RecvAppData $ tt;
+    data <- yield RecvAppData;
     x <- yield SendPacket $ (PAppData (mconcat ([s2b ("HTTP/1.1 200 OK" ++ CR ++ LF ++ "Content-Type: text/plain" ++ CR ++ LF ++ CR ++ LF ++ "Hello, "); data; s2b ("!" ++ CR ++ LF)])));
-    _ <- yield Close $ tt; Return tt
+    _ <- yield Close $ (Alert_Warning, CloseNotify); Return tt
       (*
     _ <- yield SendPacket $ pac;
     _ <- yield Close $ tt;
@@ -1028,9 +1043,7 @@ Definition doHandshake (fuel:nat) (cch: CertificateChain)(pr: PrivateKey)(_: ret
       fuel tt
  *)
   else
-    _ <- yield SendPacket $ (PAlert [(Alert_Fatal, DecryptError)]);
-    _ <- yield Close $ tt; 
-    Return tt)
+    alert DecryptError)
 .
 
 Definition doHandshake_derive :
@@ -1039,18 +1052,39 @@ Definition doHandshake_derive :
                 { init | @equiv_coro _ _ _ _ _ state step init (doHandshake fuel certs priv) } } }.
 Proof.
   do 3 eexists.
+  (*
   unfold doHandshake.
-  Time (unshelve derive_coro (tt,fuel,certs,priv); exact inhabitant).
-  Optimize Proof.
+  intros.
+  Set Ltac Profiling.
+  unshelve derive_coro (tt,fuel,certs,priv); intros; exact inhabitant.
+  Show Ltac Profile.
   Time Defined.
+*)
+  lazymatch goal with
+    |- ?x => assert x
+  end.
+  unfold doHandshake.
+  intros.
+  Time unshelve derive_coro (tt,fuel,certs,priv); intros; exact inhabitant.
+  lazymatch goal with
+    |- @equiv_coro _ _ _ _ _ ?state ?step _ _ =>
+    assert Set;
+      [ pose state as st; transparent_abstract (exact st) using doHandshake_state
+      |];
+    assert (step_type (const_yield args_tls) (const_yield rets_tls) unit doHandshake_state);
+    [ pose step as stp; transparent_abstract (exact stp) using doHandshake_step|]
+  end.
+  Time Admitted.
 
-
-
+Axiom doHandshake_equiv : forall fuel certs keys,
+  equiv_coro doHandshake_step (inl (tt,fuel,certs,keys)) (doHandshake fuel certs keys).
+(*
 Definition doHandshake_step := projT1 (projT2 doHandshake_derive).
 
 Definition doHandshake_equiv fuel certs keys :
-  equiv_coro doHandshake_step (inl (tt,fuel,certs,keys)) (doHandshake fuel certs keys) :=
+  equiv_coro doHandshake_step (tnr1 (tt,fuel,certs,keys)) (doHandshake fuel certs keys) :=
   proj2_sig (projT2 (projT2 doHandshake_derive) fuel certs keys).
+ *)
 
 Hint Resolve doHandshake_equiv : equivc.
 
@@ -1066,61 +1100,105 @@ Notation "r <- 'yield' 'SendData' $ a ; p" :=
  *)
 
 
+Inductive CProtocolType :=
+| CProtocolType_ChangeCipherSpec
+| CProtocolType_Alert
+| CProtocolType_Handshake
+| CProtocolType_AppData
+| CProtocolType_DeprecatedHandshake.
 
-Definition decode header bs (s:unit+unit+unit+unit) o : t (const_yield args_tls) (const_yield rets_tls) (option rets_tls) :=
-  match decodeRecord header o bs with
-  | inl al => Return (Some (RetAlert al))
-  | inr r =>
-    match changeCipherSpec r with
-    | Some _ => Return None
-    | None =>
-      match s with
-      | inr _ =>
-        match clientHello r with
-        | None => Return (Some (RetAlert (Alert_Fatal, UnexpectedMessage)))
-        | Some c => Return (Some (FromRecvClientHello (bs,c)))
-        end
-      | inl (inr _) =>
-        match changeCipherSpec r with
-        | None => Return (Some (RetAlert (Alert_Fatal, UnexpectedMessage)))
-        | Some _ => Return (Some FromRecvCCS)
-        end
-      | inl (inl (inr _)) =>
-        match handshake r with
-        | None => Return (Some (RetAlert (Alert_Fatal, UnexpectedMessage)))
-        | Some h =>
-          match finished h with
-          | None => Return (Some (RetAlert (Alert_Fatal, UnexpectedMessage)))
-          | Some f => Return (Some (FromRecvFinished f))
-          end
-        end
-      | inl (inl (inl _)) =>
-        match appData r with
-        | None => Return (Some (RetAlert (Alert_Fatal, UnexpectedMessage)))
-        | Some a => Return (Some (FromRecvAppData a))
-        end
-      end
-    end
+Parameter TLSError : Set.
+Parameter errorToAlert : TLSError -> AlertLevel * AlertDescription.
+
+Inductive ParseResult (a:Set) :=
+| PError : TLSError -> ParseResult a
+| PPartial : (ByteString -> ParseResult a) -> ParseResult a
+| PSuccess : a -> ParseResult a
+| PSuccessRemaining : a -> ByteString -> ParseResult a.
+
+Definition isPError {a} (x : ParseResult a) :=
+  match x with
+  | PError _ err => Some (errorToAlert err)
+  | _ => None
   end.
 
-(*
-Definition seqNum (current : ByteString * nat)(key : ByteString) :=
-  let (k,n) := current in
-  if ByteString_beq key k key then
-    (k, S n, n)
-  else
-    (key, 1, 0).
-*)
-(*
-  (fix aux pre tbl :=
-     match tbl with
-     | [] => ((key,1)::pre, 0)
-     | (k,n)::rest =>
-       if ByteString_beq k key then
-         ((k,S n)::pre ++ tbl, n)%list
-       else aux ((k,n)::pre) rest
-     end) [] tbl.
-*)
+Definition isPPartial {a} (x : ParseResult a) :=
+  match x with
+  | PPartial _ cont => Some cont
+  | _ => None
+  end.
+
+Definition isPSuccess {a} (x : ParseResult a) :=
+  match x with
+  | PSuccess _ p => Some p
+  | _ => None
+  end.
+
+Scheme Equality for CProtocolType.
+
+Parameter HandshakeType : Set.
+
+Parameter decodeHeader : ByteString -> AlertDescription + Header.
+Parameter decodeRecord : Header -> option (Hash * Cipher * ByteString * nat) -> ByteString -> AlertDescription + CProtocolType * ByteString.
+Parameter parseHandshakeRecord : option (ByteString -> ParseResult (HandshakeType * ByteString)) -> ByteString -> ParseResult (HandshakeType * ByteString).
+Parameter parseHandshake : HandshakeType * ByteString -> AlertLevel * AlertDescription + CHandshake.
+
+Definition decode boCont header bs (s:RecvType) o : t (const_yield args_tls) (const_yield rets_tls) (option (_ + rets_tls)) :=
+  let (b,oCont) := (boCont : ByteString * option (ByteString -> ParseResult _))in
+  match decodeRecord header o bs with
+  | inl al => Return (Some (inr (RetAlert (Alert_Fatal, al))))
+  | inr (ty,bs') =>
+    if CProtocolType_beq ty CProtocolType_Handshake then
+      let p := parseHandshakeRecord oCont bs' in
+      match isPError p with
+      | Some al => Return (Some (inr (RetAlert al)))
+      | None =>
+        match isPPartial p with
+        | Some cont => Return (Some (inl (mconcat [b;bs], cont)))
+        | None =>
+          match isPSuccess p with
+          | Some r =>
+            match parseHandshake r with
+            | inl al => Return (Some (inr (RetAlert al)))
+            | inr h =>
+              match finished h with
+              | Some fin =>
+                if RecvType_beq s  RFinished then
+                  Return (Some (inr (FromRecvFinished fin)))
+                else
+                  Return (Some (inr (RetAlert (Alert_Fatal, UnexpectedMessage))))
+              | None =>
+                match clientHello h with
+                | Some ch =>
+                  if RecvType_beq s RClientHello then
+                    Return (Some (inr (FromRecvClientHello (mconcat [b;bs],ch))))
+                  else
+                    Return (Some (inr (RetAlert (Alert_Fatal, UnexpectedMessage))))
+                | None =>
+                  Return (Some (inr (RetAlert (Alert_Fatal, UnexpectedMessage))))
+                end
+              end
+            end
+          | None => Return (Some (inr (RetAlert (Alert_Fatal, DecodeError))))
+          end
+        end
+      end
+    else
+      match oCont with
+      | Some _ => Return (Some (inr (RetAlert (Alert_Fatal, UnexpectedMessage))))
+      | None =>
+        if CProtocolType_beq ty CProtocolType_ChangeCipherSpec then
+          Return None
+        else
+          if CProtocolType_beq ty CProtocolType_AppData then
+            if RecvType_beq s RAppData then
+              Return (Some (inr (FromRecvAppData bs')))
+            else
+              Return (Some (inr (RetAlert (Alert_Fatal, UnexpectedMessage))))
+          else
+            Return (Some (inr (RetAlert (Alert_Fatal, UnexpectedMessage))))
+      end
+  end.
 
 Parameter maxCiphertextSize : nat.
 
@@ -1154,11 +1232,17 @@ Definition isSetSecret p :=
   | _ => None
   end.
 
+Definition isCloseWith p :=
+  match p with
+  | closeWith a => Some a
+  | _ => None
+  end.
+
 Definition readWrite fuel certs keys(_: rets_tls) : t (const_yield _) (const_yield rets_tls) (option String.string) :=
   pipe (doHandshake fuel certs keys) (fun coro : coro_type doHandshake_step =>
   nat_rect_nondep
     (fun _ => Return None)
-    (fun _ rec (ctx: option (Hash * Cipher * ByteString * nat) * option (Hash * Cipher * ByteString * nat) * option (unit+unit+unit+unit) * ByteString * rets_tls * coro_type doHandshake_step) =>
+    (fun _ rec (ctx: option (Hash * Cipher * ByteString * nat) * option (Hash * Cipher * ByteString * nat) * option (RecvType * (ByteString * option (ByteString -> ParseResult (HandshakeType * ByteString)))) * ByteString * rets_tls * coro_type doHandshake_step) =>
        _ <- yield (getRandomBytes 0); (* needed for compiler limitation *)
        match ctx with
        | (recvinfo,sendinfo,omtype,bs,a,c) =>
@@ -1167,7 +1251,7 @@ Definition readWrite fuel certs keys(_: rets_tls) : t (const_yield _) (const_yie
          r <- resume c $ a;
          match isRecvPacket r with
          | Some mtype =>
-           rec (recvinfo, sendinfo, Some mtype, bs, a, c)
+           rec (recvinfo, sendinfo, Some (mtype, (empty, None)), bs, a, c)
          | None =>
            match isSendPacket r with
            | Some pkt  =>
@@ -1180,41 +1264,62 @@ Definition readWrite fuel certs keys(_: rets_tls) : t (const_yield _) (const_yie
                rec (recvinfo, Some (q, S num), None, bs, a', c)
              end
            | None =>
-             match isSetSecret r with
-             | Some (q, true) =>
-               rec (Some (q,0), sendinfo, None, bs, FromSetSecret, c)
-             | Some (q, false) =>
-               rec (recvinfo, Some (q,0), None, bs, FromSetSecret, c)
+             match isCloseWith r with
+             | Some al =>
+               match sendinfo with
+               | None =>
+                 _ <- yield SendData $ (PAlert [al], None);
+                 a' <- yield Close $ al;
+                 rec (recvinfo, None, None, bs, a', c)
+               | Some (q,num) =>
+                 _ <- yield SendData $ (PAlert [al], Some (q,num));
+                 a' <- yield Close $ al;
+                 rec (recvinfo, Some (q, S num), None, bs, a', c)
+               end
              | None =>
-               a' <- yield r;
-                 rec (recvinfo, sendinfo, None, bs, a', c)
+               match isSetSecret r with
+               | Some (q, true) =>
+                 rec (Some (q,0), sendinfo, None, bs, FromSetSecret, c)
+               | Some (q, false) =>
+                 rec (recvinfo, Some (q,0), None, bs, FromSetSecret, c)
+               | None =>
+                 a' <- yield r;
+                   rec (recvinfo, sendinfo, None, bs, a', c)
+               end
              end
            end
          end
-       | Some mtype =>
+       | Some (mtype, bocont) =>
          if Nat.ltb (Blength bs) 5 then
            bs' <- yield RecvData $ tt;
-           rec (recvinfo, sendinfo, Some mtype, mconcat [bs; bs'], a, c)
+           rec (recvinfo, sendinfo, Some (mtype, bocont), mconcat [bs; bs'], a, c)
          else
            let (hd,rest) := Bsplit 5 bs in
-           match decodeHeader' hd with
+           match decodeHeader hd with
            | inl al => rec (recvinfo, sendinfo, None, rest, RetAlert (Alert_Fatal, al), c)
            | inr hdr =>
              if Nat.ltb maxCiphertextSize (hdReadLen hdr) then
                rec (recvinfo, sendinfo, None, empty, RetAlert (Alert_Fatal, RecordOverflow), c)
              else if Nat.ltb (Blength rest) (hdReadLen hdr) then
                bs' <- yield RecvData $ tt;
-               rec (recvinfo, sendinfo, Some mtype, mconcat [bs; bs'], a, c)
+               rec (recvinfo, sendinfo, Some (mtype, bocont), mconcat [bs; bs'], a, c)
              else
              let (msg,rest') := Bsplit (hdReadLen hdr) rest in
-             oa' <<- decode hdr msg mtype recvinfo;
+             oa' <<- decode bocont hdr msg mtype recvinfo;
              match oa' with
-             | None => rec (recvinfo, sendinfo, Some mtype, rest', a, c)
-             | Some a' =>
+             | None => rec (recvinfo, sendinfo, Some (mtype, bocont), rest', a, c)
+             | Some (inr a') =>
                match recvinfo with
                | Some (q, num) =>
                  rec (Some (q, S num), sendinfo, None, rest', a', c)
                | None => rec (None, sendinfo, None, rest', a', c)
+               end
+             | Some (inl (b,cont)) =>
+               match recvinfo with
+               | Some (q, num) =>
+                 rec (Some (q, S num), sendinfo, Some (mtype, (b,Some cont)), rest', a, c)
+               | None =>
+                 rec (recvinfo, sendinfo, Some (mtype, (b,Some cont)), rest', a, c)
                end
              end
            end
@@ -1233,16 +1338,47 @@ Program Instance id_HasGenForall2 : HasGenForall2 (fun A:Set => A) :=
 
 Opaque doHandshake_derive.
 
+Parameter dummy_Error : TLSError.
+
+Instance ParseResult_Inhabit (A:Set) : Inhabit (ParseResult A) :=
+  { inhabitant := PError _ dummy_Error }.
+
+Instance RecvType_Inhabit : Inhabit RecvType :=
+  { inhabitant := RClientHello }.
+
+Instance ternary_Inhabit2 (A B C:Set) `{ Inhabit B } : Inhabit (ternary A B C) :=
+  { inhabitant := tnr2 inhabitant }.
+
+Instance ternary_Inhabit3 (A B C:Set) `{ Inhabit C } : Inhabit (ternary A B C) :=
+  { inhabitant := tnr3 inhabitant }.
+Opaque doHandshake_step.
 Definition readWrite_derive :
   { state & { step &
               forall fuel certs priv,
                 { init | @equiv_coro _ _ _ _ _ state step init (readWrite fuel certs priv) } } }.
 Proof.
   do 3 eexists.
+  
+  lazymatch goal with
+    |- ?x => assert x
+  end.
   unfold decode.
-  unshelve derive (tt,fuel,certs,priv); exact inhabitant.
+  intros.
+  Time unshelve derive (tt,fuel,certs,priv); intros; exact inhabitant.
+  lazymatch goal with
+    |- @equiv_coro _ _ _ _ _ ?state ?step _ _ =>
+    assert Set;
+      [ pose state as st; transparent_abstract (exact st) using readWrite_state |];
+    assert (step_type (const_yield args_tls) (const_yield rets_tls) (option string) readWrite_state);
+    pose step as stp
+  end.
+  transparent_abstract (exact stp) using readWrite_step.
+  Time Admitted.
+(*
+  unfold decode.
+  unshelve derive (tt,fuel,certs,priv); intros; exact inhabitant.
 Time Defined.
-
+*)
 Inductive eff_conn := accept | perform | receive | skip.
 
 
@@ -1265,13 +1401,13 @@ Definition rets_conn (e : eff_conn) :=
 Notation "r <- ef a ; p" :=
   (@Eff eff_conn args_conn rets_conn _ ef a (fun r => p))
     (at level 100, ef at level 0, right associativity).
-
+(*
 Definition readWrite_step :=
   projT1 (projT2 readWrite_derive).
-
-Definition readWrite_equiv fuel certs keys :
-  equiv_coro readWrite_step (inl (tt,fuel,certs,keys)) (readWrite fuel certs keys) :=
-  proj2_sig (projT2 (projT2 readWrite_derive) fuel certs keys).
+*)
+Axiom readWrite_equiv : forall fuel certs keys,
+  equiv_coro readWrite_step (inl (tt,fuel,certs,keys)) (readWrite fuel certs keys) (*:=
+  proj2_sig (projT2 (projT2 readWrite_derive) fuel certs keys)*).
 
 Hint Resolve readWrite_equiv : equivc.
 
@@ -1316,7 +1452,9 @@ Fixpoint lookupAndDelete' {A : Set} key (m : Map A) (ctx : Map A -> Map A) :=
 Definition lookupAndDelete {A : Set} key (m : Map A) :=
   lookupAndDelete' key m (fun x => x).
 
-Definition main_loop fuel fuel' fuel'' certs keys := Eval unfold option_branch in
+Opaque readWrite_step.
+
+Definition main_loop fuel fuel' fuel'' certs keys :=
   nat_rect_nondep
     (fun _ => Return (@None unit))
     (fun _ rec maps =>
@@ -1433,11 +1571,12 @@ Definition main_loop_derive  :
                 { init | @equiv _ _ _ _ state step init (main_loop fuel fuel' fuel'' certs keys) } } }.
 Proof.
   do 3 eexists.
-  derive (tt,fuel,fuel',fuel'',certs,keys).
+  Time derive (tt,fuel,fuel',fuel'',certs,keys).
   Grab Existential Variables.
-  all: exact inhabitant.
+  all: intros; exact inhabitant.
 Time Defined.
 
+Transparent doHandshake_step readWrite_step.
 
 Definition main_loop_step := Eval cbv [projT1 projT2 main_loop main_loop_derive] in (projT1 (projT2 (main_loop_derive))).
 
@@ -1504,7 +1643,7 @@ Extract Inductive AlertDescription => "I.AlertDescription"
   "I.NoApplicationProtocol"].
 Extract Constant ProtocolType => "I.ProtocolType".
 Extract Constant decodeRecord => "Helper.decodeRecord".
-Extract Constant decodeHeader' => "\bs  -> case I.decodeHeader bs of { Prelude.Right a -> Prelude.Right a ; Prelude.Left (T.Error_Protocol (_,_,al)) -> Prelude.Left al }".
+Extract Constant decodeHeader => "\bs  -> case I.decodeHeader bs of { Prelude.Right a -> Prelude.Right a ; Prelude.Left err -> Prelude.Left (snd (errorToAlert err)) }".
 Extract Constant Certificate => "X.Certificate".
 Extract Constant CertificateChain => "X.CertificateChain".
 Extract Constant getCertificates => "\cch -> case cch of { X.CertificateChain certs -> Prelude.map X.getCertificate certs }".
@@ -1527,13 +1666,18 @@ Extract Constant TLS13 => "T.TLS13".
 Extract Constant extensionRaw_KeyShare => "I.ExtensionRaw I.extensionID_KeyShare".
 Extract Constant extensionRaw_SupportedVersions =>
 "I.ExtensionRaw I.extensionID_SupportedVersions".
-
+Extract Constant extension_SupportedGroups =>
+"\exts -> case Helper.extensionLookup I.extensionID_SupportedGroups exts GHC.Base.>>= I.extensionDecode I.MsgTClientHello".
 Extract Constant extension_KeyShare =>
 "(\exts -> case Helper.extensionLookup I.extensionID_KeyShare exts GHC.Base.>>= I.extensionDecode I.MsgTClientHello of { GHC.Base.Just (I.KeyShareClientHello kses) -> GHC.Base.return kses})".
 Extract Constant serverGroups => "Helper.serverGroups".
 Extract Constant changeCipherSpec => "\p -> case p of { I.ChangeCipherSpec13 -> GHC.Base.Just (); _ -> GHC.Base.Nothing }".
 Extract Constant extension_SignatureAlgorithms =>
 "(\exts -> case Helper.extensionLookup I.extensionID_SignatureAlgorithms exts GHC.Base.>>= I.extensionDecode I.MsgTClientHello of { GHC.Base.Just (I.SignatureAlgorithms sas) -> GHC.Base.Just sas; _ -> GHC.Base.Nothing })".
+Extract Constant extensionLookup_SignatureAlgorithms =>
+"Helper.extensionLookup I.extensionID_SignatureAlgorithms".
+Extract Constant extensionDecode_SignatureAlgorithms =>
+"\exts -> case I.extensionDecode I.MsgTClientHello exts of { GHC.Base.Just (I.SignatureAlgorithms sas) -> GHC.Base.Just sas; _ -> GHC.Base.Nothing }".
 Extract Constant defaultCertChain => "Helper.defaultCertChain".
 Extract Constant empty => "B.empty".
 Extract Constant PublicKey => "X.PubKey".
@@ -1545,7 +1689,7 @@ Extract Constant Cipher => "T.Cipher".
 Extract Constant cipherID => "T.cipherID".
 Extract Constant CipherID_beq => "(GHC.Base.==)".
 Extract Constant cipherHash => "T.cipherHash".
-Extract Constant serverCiphers => "I.ciphersuite_13".
+Extract Constant serverCiphers => "I.ciphersuite_default".
 Extract Constant sniExt => "Helper.sniExt".
 Extract Constant CryptoError => "I.CryptoError".
 Extract Constant encodeGroupPublic => "I.encodeGroupPublic".
@@ -1601,6 +1745,14 @@ Extract Constant extension_SupportedVersionsCH => "\exts -> case Helper.extensio
 Extract Constant Word64max => "Prelude.max".
 Extract Constant CompressionID => "T.CompressionID".
 Extract Constant dummyCompressionID => "GHC.Base.undefined".
+Extract Constant TLSError => "I.TLSError".
+Extract Constant errorToAlert => "Helper.errorToAlert".
+Extract Constant parseHandshakeRecord => "Helper.parseHandshakeRecord".
+Extract Constant HandshakeType => "I.HandshakeType13".
+Extract Constant parseHandshake => "Helper.parseHandshake".
+
+Extract Inductive CProtocolType => "I.ProtocolType" ["I.ProtocolType_ChangeCipherSpec" "I.ProtocolType_Alert" "I.ProtocolType_Handshake" "I.ProtocolType_AppData" "I.ProtocolType_DeprecatedHandshake"].
+Extract Inductive ParseResult => "I.GetResult" ["I.GotError" "I.GotPartial" "I.GotSuccess" "I.GotSuccessRemaining"].
 
 Require Extraction.
 Extraction Language Haskell.
