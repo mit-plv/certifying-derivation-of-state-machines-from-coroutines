@@ -95,6 +95,7 @@ core sock x ef (r::Any) newAccepts received = do
                   bs <- encodePacket13 (pkt,m)
                   case bs of
                     Right b -> do
+                          putStrLn $ show $ toLazyByteString $ byteStringHex b
                           forkIO $ SB.sendAll s b >> (putMVar received (adr, FromSendPacket encoded))
                           return ()
             GroupGetPubShared a' ->

@@ -635,12 +635,16 @@ Instance sigT_args_inhabit : Inhabit args_tls :=
   { inhabitant := getCurrentTime tt }.
 
 Parameter ProtocolType : Set.
+Parameter Header : Set.
+Parameter hdReadLen : Header -> nat.
+(*
 Inductive Header := header : ProtocolType -> Version -> nat -> Header.
 
 Definition hdReadLen hd :=
   match hd with
   | header _ _ n => n
   end.
+ *)
 
 Parameter Bsplit :  nat -> ByteString -> ByteString * ByteString.
 
@@ -822,11 +826,11 @@ Definition doHelloRetryRequest chEncoded' ch hash cipher
                          extensionRaw_SupportedVersions selectedVersion]
     in
     let hrr := HServerHello hrrRandom ch.(chSess) (cipherID cipher) extensions in
-    _ <- yield SendPacket $ PHandshake [hrr];
+    hrrEncoded <- yield SendPacket $ PHandshake [hrr];
     _ <- yield SendPacket $ PChangeCipherSpec;
     d <- yield RecvClientHello;
     let (chEncoded, chnew) := (d : ByteString * ClientHelloMsg) in
-    let transcript := [messageHash00; natToBytes (Blength chHashed); chHashed; chEncoded] in
+    let transcript := [messageHash00; natToBytes (Blength chHashed); chHashed; hrrEncoded; chEncoded] in
     keyShares <~ ifSome extension_KeyShare chnew.(chExt)
       {{ alert IllegalParameter }}
     match hd_error keyShares with
@@ -895,8 +899,9 @@ Definition doHandshake (fuel:nat) (cch: CertificateChain)(pr: PrivateKey)(_: ret
   if negb (clientKeySharesValid keyShares cSupportedGroups) then
     alert IllegalParameter
   else
-  o <<- match findKeyShare keyShares serverGroups with
-        | None => Return None(*doHelloRetryRequest chEncoded se usedHash cipher*)
+  let oks := findKeyShare keyShares serverGroups in
+  o <<- match oks with
+        | None => doHelloRetryRequest chEncoded se usedHash cipher
         | Some keyShare =>
           Return (Some ([chEncoded], se, keyShare))
         end;
@@ -953,14 +958,18 @@ Definition doHandshake (fuel:nat) (cch: CertificateChain)(pr: PrivateKey)(_: ret
             (PHandshake [HServerHello (SR srand) sess (cipherID cipher) extensions']);
 
   (* calculate handshake secrets *)
-  let hCh := hashWith usedHash [chEncoded; shEncoded] in
+  let hCh := hashWith usedHash (transcript' ++ [shEncoded])%list in
   let clientEarlySecret := hkdfExpandLabel usedHash earlySecret (s2b "c e traffic") hCh hsize in
   
   let handshakeSecret := hkdfExtract usedHash (hkdfExpandLabel usedHash earlySecret (s2b "derived") (hashWith usedHash [s2b ""]) hsize) ecdhe in
   let clientHandshakeSecret := hkdfExpandLabel usedHash handshakeSecret (s2b "c hs traffic") hCh hsize in
   let serverHandshakeSecret := hkdfExpandLabel usedHash handshakeSecret (s2b "s hs traffic") hCh hsize in
 
-  ccsEncoded <- yield SendPacket $ PChangeCipherSpec;
+  _ <<-
+    match oks with
+    | Some _ => _ <- yield SendPacket $ PChangeCipherSpec; Return tt
+    | None => Return tt
+    end;
   _ <- yield SetSecret $ (usedHash, cipher, serverHandshakeSecret, false);
   extEncoded <- yield SendPacket $
              (PHandshake [HEncryptedExtensions eExts]);
@@ -1001,7 +1010,7 @@ Definition doHandshake (fuel:nat) (cch: CertificateChain)(pr: PrivateKey)(_: ret
   let hashed''' := hashWith (cipherHash cipher) (transcript ++ [finEncoded; encodeHandshake13 (HFinished fin)]) in
   let resumptionMasterSecret := hkdfExpandLabel usedHash applicationSecret (s2b "res master") hashed''' hsize in
   _ <- yield SetSecret $ (usedHash, cipher, clientApplicationSecret, true);
-  if ByteString_beq fin (makeVerifyData usedHash clientHandshakeSecret hashed'') then (*
+  if ByteString_beq fin (makeVerifyData usedHash clientHandshakeSecret hashed'') then
     b <- yield GetRandomBytes $ 36;
       let nonceBAgeAdd := Bsplit 32 b in
       let nonce := fst nonceBAgeAdd in
@@ -1013,7 +1022,8 @@ Definition doHandshake (fuel:nat) (cch: CertificateChain)(pr: PrivateKey)(_: ret
                     estimatedRTT := Some (Word64minus cfRecvTime sfSentTime) |}
     in
     let pac := PHandshake [HNewSessionTicket life (bytes2w32 bAgeAdd) nonce (s2b "TestSession") []] in
-    _ <- yield SetPSK $ ("TestSession",
+    sessionName <- yield GetRandomBytes $ 6;
+    _ <- yield SetPSK $ (b2s sessionName,
                          {| sessionVersion := TLS13;
                             sessionCipher := cipherID cipher;
                             sessionGroup := None;
@@ -1025,7 +1035,7 @@ Definition doHandshake (fuel:nat) (cch: CertificateChain)(pr: PrivateKey)(_: ret
                             sessionMaxEarlyDataSize := 5;
                             sessionFlags := []
                          |});
-    _ <- yield SendPacket $ pac; *)
+    _ <- yield SendPacket $ pac;
     data <- yield RecvAppData;
     x <- yield SendPacket $ (PAppData (mconcat ([s2b ("HTTP/1.1 200 OK" ++ CR ++ LF ++ "Content-Type: text/plain" ++ CR ++ LF ++ CR ++ LF ++ "Hello, "); data; s2b ("!" ++ CR ++ LF)])));
     _ <- yield Close $ (Alert_Warning, CloseNotify); Return tt
@@ -1142,6 +1152,7 @@ Parameter decodeHeader : ByteString -> AlertDescription + Header.
 Parameter decodeRecord : Header -> option (Hash * Cipher * ByteString * nat) -> ByteString -> AlertDescription + CProtocolType * ByteString.
 Parameter parseHandshakeRecord : option (ByteString -> ParseResult (HandshakeType * ByteString)) -> ByteString -> ParseResult (HandshakeType * ByteString).
 Parameter parseHandshake : HandshakeType * ByteString -> AlertLevel * AlertDescription + CHandshake.
+Parameter dummyCCS : ByteString.
 
 Definition decode boCont header bs (s:RecvType) o : t (const_yield args_tls) (const_yield rets_tls) (option (_ + rets_tls)) :=
   let (b,oCont) := (boCont : ByteString * option (ByteString -> ParseResult _))in
@@ -1188,7 +1199,10 @@ Definition decode boCont header bs (s:RecvType) o : t (const_yield args_tls) (co
       | Some _ => Return (Some (inr (RetAlert (Alert_Fatal, UnexpectedMessage))))
       | None =>
         if CProtocolType_beq ty CProtocolType_ChangeCipherSpec then
-          Return None
+          if ByteString_beq dummyCCS bs' then
+            Return None
+          else
+            Return (Some (inr (RetAlert (Alert_Fatal, UnexpectedMessage))))
         else
           if CProtocolType_beq ty CProtocolType_AppData then
             if RecvType_beq s RAppData then
@@ -1594,7 +1608,6 @@ Extract Inductive Group => "T.Group" ["T.P256" "T.P384" "T.P521" "T.X25519"].
 Extract Inductive KeyShare => "I.KeyShareEntry" ["I.KeyShareEntry"].
 Extract Inductive CHandshake => "I.Handshake13" ["I.ClientHello13" "I.ServerHello13" "I.NewSessionTicket13" "I.EndOfEarlyData13" "I.EncryptedExtensions13" "I.CertRequest13" "I.Certificate13" "I.CertVerify13" "I.Finished13" "I.KeyUpdate13"].
 Extract Inductive CPacket => "I.Packet13" ["I.Handshake13" "I.Alert13" "I.ChangeCipherSpec13" "I.AppData13"].
-Extract Inductive Header => "I.Header" ["I.Header"].
 Extract Inductive CServerRandom => "I.ServerRandom" ["I.ServerRandom"].
 Extract Inductive CClientRandom => "I.ClientRandom" ["I.ClientRandom"].
 Extract Inductive SessionData => "I.SessionData" ["I.SessionData"].
@@ -1667,7 +1680,9 @@ Extract Constant extensionRaw_KeyShare => "I.ExtensionRaw I.extensionID_KeyShare
 Extract Constant extensionRaw_SupportedVersions =>
 "I.ExtensionRaw I.extensionID_SupportedVersions".
 Extract Constant extension_SupportedGroups =>
-"\exts -> case Helper.extensionLookup I.extensionID_SupportedGroups exts GHC.Base.>>= I.extensionDecode I.MsgTClientHello of { GHC.Base.Just (I.NegotiatedGroups gs) -> GHC.Base.Just gs; _ -> GHC.Base.Nothing }".
+"\exts -> case Helper.extensionLookup I.extensionID_NegotiatedGroups exts GHC.Base.>>= I.extensionDecode I.MsgTClientHello of { GHC.Base.Just (I.NegotiatedGroups gs) -> GHC.Base.Just gs; _ -> GHC.Base.Nothing }".
+Extract Constant extension_NegotiatedGroups =>
+"\exts -> case Helper.extensionLookup I.extensionID_NegotiatedGroups exts GHC.Base.>>= I.extensionDecode I.MsgTClientHello of { GHC.Base.Just (I.NegotiatedGroups gs) -> GHC.Base.Just gs; _ -> GHC.Base.Nothing }".
 Extract Constant extension_KeyShare =>
 "(\exts -> case Helper.extensionLookup I.extensionID_KeyShare exts GHC.Base.>>= I.extensionDecode I.MsgTClientHello of { GHC.Base.Just (I.KeyShareClientHello kses) -> GHC.Base.return kses})".
 Extract Constant serverGroups => "Helper.serverGroups".
@@ -1729,6 +1744,7 @@ Extract Constant extension_PskKeyModes =>
 "(\exts -> case Helper.extensionLookup I.extensionID_PskKeyExchangeModes exts GHC.Base.>>= I.extensionDecode I.MsgTClientHello of { GHC.Base.Just (I.PskKeyExchangeModes ms) -> GHC.Base.return ms; GHC.Base.Nothing -> GHC.Base.return []})".
 Extract Constant Btake => "B.take".
 Extract Constant extensionEncode_PreSharedKey => "I.extensionEncode".
+Extract Constant extensionEncode_SupportedVersionsServerHello => "\v -> I.extensionEncode (I.SupportedVersionsServerHello v)".
 Extract Constant life => "172800".
 Extract Constant Word64gt => "(Prelude.>)".
 Extract Constant Word32le => "(Prelude.<=)".
@@ -1750,7 +1766,18 @@ Extract Constant errorToAlert => "Helper.errorToAlert".
 Extract Constant parseHandshakeRecord => "Helper.parseHandshakeRecord".
 Extract Constant HandshakeType => "I.HandshakeType13".
 Extract Constant parseHandshake => "Helper.parseHandshake".
-
+Extract Constant messageHash00 => "B.pack [254,0,0]".
+Extract Constant hrrRandom => "I.ServerRandom (B.pack [ 
+    0xCF, 0x21, 0xAD, 0x74, 0xE5, 0x9A, 0x61, 0x11
+  , 0xBE, 0x1D, 0x8C, 0x02, 0x1E, 0x65, 0xB8, 0x91
+  , 0xC2, 0xA2, 0x11, 0x16, 0x7A, 0xBB, 0x8C, 0x5E
+  , 0x07, 0x9E, 0x09, 0xE2, 0xC8, 0xA8, 0x33, 0x9C
+  ])".
+Extract Constant extensionEncode_KeyShareHRR => "\x -> I.extensionEncode (I.KeyShareHRR x)".
+Extract Constant natToBytes => "\n -> B.pack [Prelude.fromIntegral n]".
+Extract Constant dummyCCS => "B.pack [1]".
+Extract Constant Header => "I.Header".
+Extract Constant hdReadLen => "\x -> case x of { I.Header _ _ n -> Prelude.fromIntegral n }".
 Extract Inductive CProtocolType => "I.ProtocolType" ["I.ProtocolType_ChangeCipherSpec" "I.ProtocolType_Alert" "I.ProtocolType_Handshake" "I.ProtocolType_AppData" "I.ProtocolType_DeprecatedHandshake"].
 Extract Inductive ParseResult => "I.GetResult" ["I.GotError" "I.GotPartial" "I.GotSuccess" "I.GotSuccessRemaining"].
 
