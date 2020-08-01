@@ -64,6 +64,11 @@ Notation "'const_yield' A" :=
   (fun _:yield_effect => A)
     (at level 10).
 
+Definition let_ {A B:Set} (x:A) (f : A -> B) := f x.
+Notation "'Let' name := v 'in' p" :=
+  (let_ v (fun name => p))
+    (at level 200).
+
 Definition seqE (A B C D ef:Set)(args rets : ef -> Set) (e : t (const_yield A) (const_yield B) D)
   : (A -> (B -> t (const_yield A) (const_yield B) D) ->
      t args rets (option C)) ->
@@ -519,6 +524,14 @@ Proof.
   destruct x; auto.
 Qed.
 
+Lemma derive_let : forall eff args rets (A B C:Set) state (x : A) f st op step P,
+    (forall a, equiv' step P (st a) (f a) (op a)) ->
+    @equiv' eff args rets B C state step P (let_ x st) (let_ x f) (let_ x op).
+Proof.
+  unfold let_.
+  auto.
+Qed.
+
 Lemma derive_prod : forall eff args rets A B C D state (x : A * B) f st op step P,
     (forall a b, equiv' step P (st a b) (f a b) (op a b)) ->
     @equiv' eff args rets C D state step P
@@ -945,6 +958,11 @@ Ltac derive_core env :=
       [ derive_core env
       | derive_core env
       ]
+    | let_ ?v ?p =>
+      eapply (derive_let _ (fun _ => _) (fun _ => _) (fun _ => _));
+      let _a := fresh in
+      intro _a;
+      derive_core (env,_a)
     | (match ?x with (_,_) => _ end) =>
       eapply (derive_prod _ (fun _ _ => _) (fun _ => _) (fun _ => _));
       let _a := fresh in
@@ -1181,6 +1199,12 @@ Ltac to_dummy i p :=
         end
       end
     end
+  | @let_ ?A ?B ?v ?f =>
+    let x := (eval cbv beta in (f (dummy _ _ i))) in
+    let d := to_dummy (S i) x in
+    lazymatch (eval pattern (dummy _ A i) in d) with
+    | ?g _ => constr:((@let_ A B v, g))
+    end
   | (match ?o with (a,b) => _ end) =>
     lazymatch (eval pattern o in p) with
     | ?F _ =>
@@ -1275,6 +1299,13 @@ Ltac reconstruct tree i :=
     lazymatch (eval pattern (dummy _ A i) in p') with
     | ?p'' _ =>
       constr:(@option_branch A B p'' q o)
+    end
+  | (@let_ ?A  ?B ?v, ?f) =>
+    let x := (eval cbv beta in (f (dummy _ _ i))) in
+    let q := reconstruct x (S i) in
+    lazymatch (eval pattern (dummy _ A i) in q) with
+    | ?p' _ =>
+      constr:(let_ v p')
     end
   | (@prod_curry ?A ?B, ?f, ?o) =>
     let x := (eval cbv beta in (f (dummy _ _ i) (dummy _ _ (S i)))) in
@@ -1768,7 +1799,7 @@ Ltac derive env :=
                           let x'' := coro_to_state x' in exact x''))
       as H by
          (change x with ltac:(let x0 := eval red in x in exact x0);
-            unfold pipe;
+            unfold pipe, let_;
             repeat mid_eq_core);
     rewrite H;
     clear H;
@@ -1791,7 +1822,7 @@ Ltac derive env :=
                             let x'' := coro_to_state x' in exact x''))
         as H by
             (change x with ltac:(let x0 := eval red in x in exact x0);
-             unfold pipe;
+             unfold pipe, let_;
              repeat mid_eq_core);
       rewrite H;
       clear H;
@@ -2101,12 +2132,13 @@ Definition tree_ex2 fuel fuel' : t args_effect rets_effect (option unit) :=
     (fun _ => Return None)
     (fun _ rec tr =>
        key <- getStr;
+         Let key' := key in
          k <- getN;
          let oc := bsearch key tr : option (@coro_type nat nat _ _ _ ) in
          match oc with
          | None =>
            pipe (ex_coroutine 0 : @coro_type nat nat _ _ ex_coroutine_step)
-                (fun c => rec (insert key c tr))
+                (fun c => rec (insert key' c tr))
          | Some c =>
            nat_rect_nondep
               (fun tr => Return None)
@@ -2115,7 +2147,7 @@ Definition tree_ex2 fuel fuel' : t args_effect rets_effect (option unit) :=
                  r <- resume c $ n;
                    putN 0;
                    if r =? 0 then
-                     let tr' := replace_map key c tr in
+                     let tr' := replace_map key' c tr in
                      rec tr'
                    else
                      rec_inner (S n, c))
