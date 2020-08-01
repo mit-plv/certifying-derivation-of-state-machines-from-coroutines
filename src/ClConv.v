@@ -399,30 +399,6 @@ Proof.
   auto.
 Qed.
 
-(*
-Lemma derive_nat_rect : forall state A C D (eff : Set)(args rets : eff -> Set) N (a0:A) f f0 st0 stS op0 opS step g,
-    (forall a, equiv' step g (st0 a) (f a a) (op0 a)) ->
-    (forall N0,
-        (forall a, equiv' step g
-                          ((fix aux N0 := match N0 with O => st0 a | S N0' => stS a N0' end) N0)
-                          (nat_rect_nondep (f a) (f0 a) N0 a)
-                          ((fix aux N0 := match N0 with O => op0 a | S N0' => opS a N0' end) N0)) ->
-        (forall a, equiv' step g (stS a N0)
-                          (f0 a N0
-                              (nat_rect_nondep
-                                    (f a) (f0 a)
-                                    N0) a) (opS a N0))) ->
-    @equiv' _ args rets C D state step g
-            ((fix aux n := match n with O => st0 a0 | S n0 => stS a0 n0 end) N)
-            (nat_rect_nondep (f a0) (f0 a0) N a0)
-            ((fix aux n := match n with O => op0 a0 | S n0 => opS a0 n0 end) N).
-Proof.
-  intros.
-  revert a0.
-  induction N; intros; simpl; auto.
-Qed.
-*)
-
 Lemma derive_nat_rect : forall state A C D (eff : Set)(args rets : eff -> Set) N (a0:A) f f0 st0 stS op0 opS step g,
     (forall a, equiv' step g (st0 a) (f a a) (op0 a)) ->
     (forall N0,
@@ -864,7 +840,7 @@ Qed.
 
 Definition Def {A B : Set} (a : A)(f : A -> B) := f a.
 
-Ltac derive_core (*ptr*) env :=
+Ltac derive_core env :=
   st_op_to_ev;[
     (solve [repeat match goal with
                    | H : ?p |- _ =>
@@ -885,17 +861,15 @@ Ltac derive_core (*ptr*) env :=
       | (fun _ => _) =>
         eassert (forall a, equiv' step P _ (c a) _);
         [ intro;
-          derive_core (*ptr*) env
+          derive_core env
         | unfold Def at 1;
-          (*let ptr := next_ptr open_constr:(fun _x => _x) in*)
-          derive_core (*ptr*) env
+          derive_core env
         ]
       | _ =>
         eassert (equiv' step P _ c _);
-        [ derive_core (*ptr*) env
+        [ derive_core env
         | unfold Def at 1;
-          (*let ptr := next_ptr open_constr:(fun _x => _x) in*)
-          derive_core (*ptr*) env
+          derive_core env
         ]
       end
     | @Eff _ ?args ?rets ?C ?e _ _ =>
@@ -913,97 +887,82 @@ Ltac derive_core (*ptr*) env :=
       let fv := free_var prog env in
       eapply (derive_bind _ (fun _ => _) (fun _ => _));
       [ assert (dmmy fv) by (unfold dmmy; exact I);
-        (*let ptr := next_ptr open_constr:(fun _x => _x) in*)
-        derive_core (*ptr*) fv
+        derive_core fv
       | let r := fresh in
         intro r;
         cbv beta;
-        (*let ptr := next_ptr open_constr:(fun _x => _x) in*)
-        derive_core (*ptr*) (fv,r)
+        derive_core (fv,r)
       ]
     | seqE' _ _ _ =>
       eapply (derive_seqE' _ (fun s v => _) (fun s v => _) (fun s v => _));
       [ let s := fresh in
         let v := fresh in
         intros s v;
-        derive_core (*ptr*) (env,s,v)
-      | (*let ptr := next_ptr open_constr:(fun _x => _x) in*)
-        derive_core (*ptr*) env ]
+        derive_core (env,s,v)
+      | derive_core env ]
     | (match ?x with inl _ => _ | inr _ => _ end) =>
       eapply (derive_sum _ _ _ (fun a => _) (fun b => _) (fun a => _) (fun b => _));
       [ let a := fresh in
         intro a;
         cbv beta;
-        (*let ptr := next_ptr open_constr:(fun _x => _x) in*)
-        derive_core (*ptr*) (env,a)
+        derive_core (env,a)
       | let b := fresh in
         intro b;
         cbv beta;
-        (*let ptr := next_ptr open_constr:(fun _x => _x) in*)
-        derive_core (*ptr*) (env,b)
+        derive_core (env,b)
       ]
     | (sum_merge _ _ ?x) =>
       eapply (derive_sum' _ _ _ (fun _ => _) (fun _ => _) (fun _ => _) (fun _ => _));
       [ let a := fresh in
         intro a;
         cbv beta;
-        (*let ptr := next_ptr open_constr:(fun _x => _x) in*)
-        derive_core (*ptr*) (env,a)
+        derive_core (env,a)
       | let b := fresh in
         intro b;
         cbv beta;
-        (*let ptr := next_ptr open_constr:(fun _x => _x) in*)
-        derive_core (*ptr*) (env,b)
+        derive_core (env,b)
       ]
     | (match ?x with Some _ => _ | None => _ end) =>
       eapply (derive_opt _ (fun _ => _) (fun _ => _) (fun _ => _));
       [ let _a := fresh in
         intro _a;
         cbv beta;
-        (*let ptr := next_ptr open_constr:(fun _x => _x) in*)
-        derive_core (*ptr*) (env,_a)
+        derive_core (env,_a)
       | cbv beta;
-        (*let ptr := next_ptr open_constr:(fun _x => _x) in*)
-        derive_core (*ptr*) env
+        derive_core env
       ]
     | option_branch _ _ ?x =>
       eapply (derive_opt' _ (fun _ => _) (fun _ => _) (fun _ => _));
       [ let _a := fresh in
         intro _a;
         cbv beta;
-        (*let ptr := next_ptr open_constr:(fun _x => _x) in*)
-        derive_core (*ptr*) (env,_a)
+        derive_core (env,_a)
       | cbv beta;
-        (*let ptr := next_ptr open_constr:(fun _x => _x) in*)
-        derive_core (*ptr*) env
+        derive_core env
       ]
     | (match ?b with true => _ | false => _ end) =>
       eapply derive_bool;
-      [ (*let ptr := next_ptr open_constr:(fun _x => _x) in*)
-        derive_core (*ptr*) env
-      | (*let ptr := next_ptr open_constr:(fun _x => _x) in*)
-        derive_core (*ptr*) env
+      [ derive_core env
+      | derive_core env
       ]
     | (match ?x with (_,_) => _ end) =>
       eapply (derive_prod _ (fun _ _ => _) (fun _ => _) (fun _ => _));
       let _a := fresh in
       let _b := fresh in
       intros _a _b;
-      derive_core (*ptr*) (env,_a,_b)
+      derive_core (env,_a,_b)
     | nat_rect_nondep _ _ _ _ =>
       (eapply (derive_nat_rect _ _ (fun a b => _) (fun a => _) (fun a => _));
        [ let a := fresh in
          intro a;
          cbv beta;
-         (*let ptr := next_ptr open_constr:(fun _x => _x) in*)
-         derive_core (*ptr*) (env,a)
+         derive_core (env,a)
        | let n := fresh in
          let H := fresh in
          let a := fresh in
          intros n H a;
          cbv beta;
-         (*let ptr := next_ptr open_constr:(fun _x => _x) in*)
-         derive_core (*ptr*) (env,n,a)
+         derive_core (env,n,a)
       ])
     | list_rec_nondep _ _ _ _ =>
       (solve [repeat match goal with
@@ -1014,20 +973,18 @@ Ltac derive_core (*ptr*) env :=
        [ let a := fresh in
          intro a;
          cbv beta;
-         (*let ptr := next_ptr open_constr:(fun _x => _x) in*)
-         derive_core (*ptr*) (env,a)
+         derive_core (env,a)
        | let b := fresh in
          let l := fresh in
          let H := fresh in
          let a := fresh in
          intros b l H a;
          cbv beta;
-         (*let ptr := next_ptr open_constr:(fun _x => _x) in*)
-         derive_core (*ptr*) (env,b,l,a)
+         derive_core (env,b,l,a)
       ])
     | _ => let prog' := (eval red in prog) in
            change prog with prog';
-           derive_core (*ptr*) env
+           derive_core env
     end
     end|unify_fun..].
 
