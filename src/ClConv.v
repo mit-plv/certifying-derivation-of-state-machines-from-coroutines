@@ -878,7 +878,7 @@ Ltac derive_core (*ptr*) env :=
                    end])
     ||
     lazymatch goal with
-      |- equiv' ?step ?P _ ?prog _ => idtac "foo";
+      |- equiv' ?step ?P _ ?prog _ =>
     lazymatch prog with
     | Def ?c ?p =>
       lazymatch c with
@@ -990,7 +990,7 @@ Ltac derive_core (*ptr*) env :=
       let _b := fresh in
       intros _a _b;
       derive_core (*ptr*) (env,_a,_b)
-    | nat_rect_nondep _ _ _ _ => idtac "natrect";
+    | nat_rect_nondep _ _ _ _ =>
       (eapply (derive_nat_rect _ _ (fun a b => _) (fun a => _) (fun a => _));
        [ let a := fresh in
          intro a;

@@ -141,12 +141,14 @@ decodeRecord header m msg =
                 , stCompression = nullCompression
                 }
   in
-  if B.length msg > 16384 + 256 then
-    Left RecordOverflow
-  else
-    case runRecordM (decodeRecordM' header msg) newRecordOptions rst of
-      Left err -> Left $ snd $ errorToAlert err
-      Right (Record ty _ fragment,_) -> Right (ty, fragmentGetBytes fragment)
+  case runRecordM (decodeRecordM' header msg) newRecordOptions rst of
+    Left err -> Left $ snd $ errorToAlert err
+    Right (Record ty _ fragment,_) ->
+      let bs = fragmentGetBytes fragment in
+      if B.length bs > 16384 then
+        Left RecordOverflow
+      else
+        Right (ty, fragmentGetBytes fragment)
 
 decodeRecordM' :: Header -> B.ByteString -> RecordM (Record Plaintext)
 decodeRecordM' header content = disengageRecord' erecord

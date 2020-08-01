@@ -78,7 +78,10 @@ core sock x ef (r::Any) newAccepts received = do
               putStrLn "RecvData"
               case lookup adr sock of
                 Just s -> do
-                  forkIO $ SB.recv s (16384 + 256) >>= \ch -> putMVar received (adr, FromRecvData ch)
+                  forkIO $ do
+                    ch <- SB.recv s (16384 + 256)
+                    putStrLn $ show $ toLazyByteString $ byteStringHex ch
+                    putMVar received (adr, FromRecvData ch)
                   return ()
                 Nothing -> error "no socket"
             GetRandomBytes a' ->
@@ -95,7 +98,6 @@ core sock x ef (r::Any) newAccepts received = do
                   bs <- encodePacket13 (pkt,m)
                   case bs of
                     Right b -> do
-                          putStrLn $ show $ toLazyByteString $ byteStringHex b
                           forkIO $ SB.sendAll s b >> (putMVar received (adr, FromSendPacket encoded))
                           return ()
             GroupGetPubShared a' ->
