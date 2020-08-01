@@ -1013,9 +1013,9 @@ Definition doHandshake (fuel:nat) (cch: CertificateChain)(pr: PrivateKey)(_: ret
   _ <- yield SetSecret $ (usedHash, cipher, clientApplicationSecret, true);
   if ByteString_beq fin (makeVerifyData usedHash clientHandshakeSecret hashed'') then
     b <- yield GetRandomBytes $ 36;
-      let nonceBAgeAdd := Bsplit 32 b in
-      let nonce := fst nonceBAgeAdd in
-      let bAgeAdd := snd nonceBAgeAdd in
+      let nonceBAgeAdd := Bsplit 4 b in
+      let nonce := snd nonceBAgeAdd in
+      let bAgeAdd := fst nonceBAgeAdd in
     let bAdd := bytes2w32 bAgeAdd in
     let tinfo := {| lifetime := life;
                     ageAdd := bAdd;
@@ -1032,16 +1032,15 @@ Definition doHandshake (fuel:nat) (cch: CertificateChain)(pr: PrivateKey)(_: ret
                             sessionClientSNI := osni;
                             sessionSecret := match pskkey with
                                              | Some key => key
-                                             | None => hkdfExpandLabel usedHash resumptionMasterSecret (s2b "resumption") (s2b "0") hsize
+                                             | None => hkdfExpandLabel usedHash resumptionMasterSecret (s2b "resumption") nonce hsize
                                              end;
                             sessionALPN := None;
                             sessionMaxEarlyDataSize := 5;
                             sessionFlags := []
                          |});
       _ <- yield SendPacket $ pac;
-      (*
     data <- yield RecvAppData;
-    x <- yield SendPacket $ (PAppData (mconcat ([s2b ("HTTP/1.1 200 OK" ++ CR ++ LF ++ "Content-Type: text/plain" ++ CR ++ LF ++ CR ++ LF ++ "Hello, "); data; s2b ("!" ++ CR ++ LF)]))); *)
+    x <- yield SendPacket $ (PAppData (mconcat ([s2b ("HTTP/1.1 200 OK" ++ CR ++ LF ++ "Content-Type: text/plain" ++ CR ++ LF ++ CR ++ LF ++ "Hello, "); data; s2b ("!" ++ CR ++ LF)])));
     _ <- yield Close $ (Alert_Warning, CloseNotify); Return None
       (*
     _ <- yield SendPacket $ pac;

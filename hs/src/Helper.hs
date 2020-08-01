@@ -63,7 +63,8 @@ extensionLookup :: ExtensionID -> [ExtensionRaw] -> Maybe B.ByteString
 extensionLookup toFind = fmap (\(ExtensionRaw _ content) -> content)
                        . find (\(ExtensionRaw eid _) -> eid == toFind)
 
-supportedGroups' = [X25519,X448,P256,FFDHE3072,FFDHE4096,P384,FFDHE6144,FFDHE8192,P521,FFDHE2048]
+supportedGroups' = [P256,P384,P521,X25519]
+--supportedGroups' = [X25519,X448,P256,FFDHE3072,FFDHE4096,P384,FFDHE6144,FFDHE8192,P521,FFDHE2048]
 
 serverGroups :: ([]) Group
 serverGroups =
