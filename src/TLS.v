@@ -808,7 +808,7 @@ Definition doHelloRetryRequest chEncoded' ch hash cipher
   : t (const_yield args_tls) (const_yield rets_tls) (option (list ByteString * ClientHelloMsg * KeyShare)) :=
   Def (fun al => (_ <- yield Close $ (Alert_Fatal, al);
                  Return None) : t (const_yield args_tls) (const_yield rets_tls) (option (list ByteString * ClientHelloMsg * KeyShare))) (fun alert =>
-  let chHashed := hashWith hash [chEncoded'] in
+  Let chHashed := hashWith hash [chEncoded'] in
 
   let clientGroups :=
       match extension_NegotiatedGroups ch.(chExt) with
@@ -830,7 +830,7 @@ Definition doHelloRetryRequest chEncoded' ch hash cipher
     _ <- yield SendPacket $ PChangeCipherSpec;
     d <- yield RecvClientHello;
     let (chEncoded, chnew) := (d : ByteString * ClientHelloMsg) in
-    let transcript := [messageHash00; natToBytes (Blength chHashed); chHashed; hrrEncoded; chEncoded] in
+    Let transcript := [messageHash00; natToBytes (Blength chHashed); chHashed; hrrEncoded; chEncoded] in
     keyShares <~ ifSome extension_KeyShare chnew.(chExt)
       {{ alert IllegalParameter }}
     match hd_error keyShares with
@@ -902,7 +902,7 @@ Definition doHandshake (fuel:nat) (cch: CertificateChain)(pr: PrivateKey)(_: ret
   else
   let oks := findKeyShare keyShares serverGroups in
   o <<- match oks with
-        | None => Return None (*doHelloRetryRequest chEncoded se usedHash cipher*)
+        | None => doHelloRetryRequest chEncoded se usedHash cipher
         | Some keyShare =>
           Return (Some ([chEncoded], se, keyShare))
         end;
@@ -910,14 +910,15 @@ Definition doHandshake (fuel:nat) (cch: CertificateChain)(pr: PrivateKey)(_: ret
     {{ alert IllegalParameter }}
   let (tch, keyShare) := (d : list ByteString * ClientHelloMsg * KeyShare) in
   let (transcript', ch) := (tch : list ByteString * ClientHelloMsg) in
+  let sess := chSess ch in
   let chExts := chExt ch in
   cpub <~ ifSome decodeGroupPublic (ksGroup keyShare) (ksData keyShare)
     {{ alert IllegalParameter }}
   mecdhePair <- yield GroupGetPubShared $ cpub;
   ecdhePair <~ ifSome mecdhePair
     {{ alert IllegalParameter }}
-  let wspub := encodeGroupPublic (fst ecdhePair) in
-  let ecdhe := ba_convert (snd ecdhePair) in
+  Let wspub := encodeGroupPublic (fst ecdhePair) in
+  Let ecdhe := ba_convert (snd ecdhePair) in
   let serverKeyShare := {| ksGroup := ksGroup keyShare; ksData := wspub |} in
   let osni := chooseServerName chExts in
   let eExts := match osni with
@@ -927,7 +928,7 @@ Definition doHandshake (fuel:nat) (cch: CertificateChain)(pr: PrivateKey)(_: ret
   in
   
   (* sendServerHello *)
-  let ks := extensionEncode_KeyShare serverKeyShare in
+  Let ks := extensionEncode_KeyShare serverKeyShare in
   let selectedVersion := extensionEncode_SupportedVersions TLS13 in
 
   let hsize := hashDigestSize usedHash in
@@ -946,6 +947,19 @@ Definition doHandshake (fuel:nat) (cch: CertificateChain)(pr: PrivateKey)(_: ret
   let extensions' :=
       extensionRaw_KeyShare ks :: extensionRaw_SupportedVersions selectedVersion  :: extensions
   in
+  ohashSigs <<-
+            if is0RTTValid then
+              Return None
+            else
+              bs <~ ifSome extensionLookup_SignatureAlgorithms chExts
+                  {{ _ <- yield Close $ (Alert_Fatal, MissingExtension);
+                     Return None }}
+              hashSigs <~ ifSome extensionDecode_SignatureAlgorithms bs
+                {{ _ <- yield Close $ (Alert_Fatal, DecodeError); Return None }}
+              pubhs <~ ifSome decideCredInfo pr certs hashSigs
+                {{ _ <- yield Close $ (Alert_Fatal, HandshakeFailure); Return None }}
+              Return (Some pubhs);
+  (*
   ohashSigs <<- _ <~ ifSome binderInfo
             {{ bs <~ ifSome extensionLookup_SignatureAlgorithms chExts
                   {{ _ <- yield Close $ (Alert_Fatal, MissingExtension);
@@ -956,12 +970,13 @@ Definition doHandshake (fuel:nat) (cch: CertificateChain)(pr: PrivateKey)(_: ret
                  {{ _ <- yield Close $ (Alert_Fatal, HandshakeFailure); Return None }}
                Return (Some pubhs)  }}
             Return None;
+*)
   srand <- yield GetRandomBytes $ 32;
   shEncoded <- yield SendPacket $
             (PHandshake [HServerHello (SR srand) sess (cipherID cipher) extensions']);
 
   (* calculate handshake secrets *)
-  let hCh := hashWith usedHash (transcript' ++ [shEncoded])%list in
+  Let hCh := hashWith usedHash (transcript' ++ [shEncoded])%list in
   let clientEarlySecret := hkdfExpandLabel usedHash earlySecret (s2b "c e traffic") hCh hsize in
   
   let handshakeSecret := hkdfExtract usedHash (hkdfExpandLabel usedHash earlySecret (s2b "derived") (hashWith usedHash [s2b ""]) hsize) ecdhe in
@@ -969,15 +984,15 @@ Definition doHandshake (fuel:nat) (cch: CertificateChain)(pr: PrivateKey)(_: ret
   let serverHandshakeSecret := hkdfExpandLabel usedHash handshakeSecret (s2b "s hs traffic") hCh hsize in
 
   _ <<-
-    match oks with
-    | Some _ => _ <- yield SendPacket $ PChangeCipherSpec; Return tt
-    | None => Return tt
-    end;
+    if Nat.ltb 2 (List.length transcript') then
+      Return tt
+    else
+      _ <- yield SendPacket $ PChangeCipherSpec; Return tt;
   _ <- yield SetSecret $ (usedHash, cipher, serverHandshakeSecret, false);
   extEncoded <- yield SendPacket $
              (PHandshake [HEncryptedExtensions eExts]);
   let sendCertAndVerify :=
-      let transcript := (transcript' ++ [shEncoded; extEncoded])%list in
+      Let transcript := (transcript' ++ [shEncoded; extEncoded])%list in
       match ohashSigs with
       | None => Return (Some transcript)
       | Some pubhs =>
@@ -993,11 +1008,12 @@ Definition doHandshake (fuel:nat) (cch: CertificateChain)(pr: PrivateKey)(_: ret
   otranscript <<- sendCertAndVerify;
   transcript <~ ifSome otranscript {{ Return None }}
   
-  let hashed' := hashWith (cipherHash cipher) transcript in
+  let hashed' := hashWith usedHash transcript in
   finEncoded <- yield SendPacket $
              (PHandshake [HFinished (makeVerifyData usedHash serverHandshakeSecret hashed')]);
+  Let tran := (transcript ++ [finEncoded])%list in
   sfSentTime <- yield GetCurrentTime $ tt;
-  let hashed'' := hashWith (cipherHash cipher) (transcript ++ [finEncoded]) in
+  let hashed'' := hashWith usedHash tran in
   let applicationSecret := hkdfExtract usedHash (hkdfExpandLabel usedHash handshakeSecret (s2b "derived") (hashWith usedHash [s2b ""]) hsize) zero in
   let clientApplicationSecret := hkdfExpandLabel usedHash applicationSecret (s2b "c ap traffic") hashed'' hsize in
   let serverApplicationSecret := hkdfExpandLabel usedHash applicationSecret (s2b "s ap traffic") hashed'' hsize in
@@ -1008,7 +1024,7 @@ Definition doHandshake (fuel:nat) (cch: CertificateChain)(pr: PrivateKey)(_: ret
   cfRecvTime <- yield GetCurrentTime $ tt;
 
   (* calculate application secrets *)
-  let hashed''' := hashWith (cipherHash cipher) (transcript ++ [finEncoded; encodeHandshake13 (HFinished fin)]) in
+  let hashed''' := hashWith usedHash (tran ++ [encodeHandshake13 (HFinished fin)]) in
   let resumptionMasterSecret := hkdfExpandLabel usedHash applicationSecret (s2b "res master") hashed''' hsize in
   _ <- yield SetSecret $ (usedHash, cipher, clientApplicationSecret, true);
   if ByteString_beq fin (makeVerifyData usedHash clientHandshakeSecret hashed'') then
@@ -1017,12 +1033,12 @@ Definition doHandshake (fuel:nat) (cch: CertificateChain)(pr: PrivateKey)(_: ret
       let nonce := snd nonceBAgeAdd in
       let bAgeAdd := fst nonceBAgeAdd in
     let bAdd := bytes2w32 bAgeAdd in
-    let tinfo := {| lifetime := life;
+    Let tinfo := {| lifetime := life;
                     ageAdd := bAdd;
                     txrxTime := cfRecvTime;
                     estimatedRTT := Some (Word64minus cfRecvTime sfSentTime) |}
     in
-    let pac := PHandshake [HNewSessionTicket life (bytes2w32 bAgeAdd) nonce (s2b "test") []] in
+    Let pac := PHandshake [HNewSessionTicket life bAdd nonce (s2b "test") []] in
     _ <- yield SetPSK $ ("test",
                          {| sessionVersion := TLS13;
                             sessionCipher := cipherID cipher;
@@ -1065,18 +1081,30 @@ Definition doHandshake_derive :
                 { init | @equiv_coro _ _ _ _ _ state step init (doHandshake fuel certs priv) } } }.
 Proof.
   do 3 eexists.
-(*
+
   unfold doHandshake.
   intros.
   Time unshelve derive_coro (tt,fuel,certs,priv); intros; exact inhabitant.
   Time Defined.
+
+(* doHandshake_derive is defined
+
+<infomsg>Finished transaction in 7750.321 secs (3605.643u,923.522s) (successful)
+</infomsg>
 *)
+(*
   lazymatch goal with
     |- ?x => assert x
   end.
   unfold doHandshake.
   intros.
   Time unshelve derive_coro (tt,fuel,certs,priv); intros; exact inhabitant.
+  Set Printing Depth 100.
+  
+  lazymatch goal with
+    |- @equiv_coro _ _ _ _ _ ?state ?step _ _ =>
+    idtac state
+  end.
   lazymatch goal with
     |- @equiv_coro _ _ _ _ _ ?state ?step _ _ =>
     assert Set;
@@ -1087,15 +1115,17 @@ Proof.
   end.
   Time Admitted.
 
+
 Axiom doHandshake_equiv : forall fuel certs keys,
   equiv_coro doHandshake_step (inl (tt,fuel,certs,keys)) (doHandshake fuel certs keys).
-(*
+*)
+
 Definition doHandshake_step := projT1 (projT2 doHandshake_derive).
 
 Definition doHandshake_equiv fuel certs keys :
-  equiv_coro doHandshake_step (tnr1 (tt,fuel,certs,keys)) (doHandshake fuel certs keys) :=
+  equiv_coro doHandshake_step (inl (tt,fuel,certs,keys)) (doHandshake fuel certs keys) :=
   proj2_sig (projT2 (projT2 doHandshake_derive) fuel certs keys).
- *)
+
 
 Hint Resolve doHandshake_equiv : equivc.
 
@@ -1785,6 +1815,7 @@ Extract Constant dummyCCS => "B.pack [1]".
 Extract Constant Header => "I.Header".
 Extract Constant hdReadLen => "\x -> case x of { I.Header _ _ n -> Prelude.fromIntegral n }".
 Extract Constant hdProtocolType => "\x -> case x of { I.Header t _ _ -> t }".
+Extract Constant extension_ALPN => "\_ ->GHC.Base.Nothing".
 Extract Inductive CProtocolType => "I.ProtocolType" ["I.ProtocolType_ChangeCipherSpec" "I.ProtocolType_Alert" "I.ProtocolType_Handshake" "I.ProtocolType_AppData" "I.ProtocolType_DeprecatedHandshake"].
 Extract Inductive ParseResult => "I.GetResult" ["I.GotError" "I.GotPartial" "I.GotSuccess" "I.GotSuccessRemaining"].
 Extract Constant pskkey => "Prelude.Nothing".
