@@ -20,7 +20,7 @@ extra-source-files:
 description:         Please see the README on GitHub at <https://github.com/githubuser/hs#readme>
 
 dependencies:
-- base >= 4.7 && < 5
+- base >= 4.8 && < 5
 - QuickCheck
 - bytestring
 - word8
@@ -34,8 +34,10 @@ dependencies:
 - tasty
 - tasty-quickcheck
 - tls >= 1.5.2
-- memory
+- memory >= 0.15.0
 - mtl
+- random
+- containers
 
 library:
   source-dirs: src

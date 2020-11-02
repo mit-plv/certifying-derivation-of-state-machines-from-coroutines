@@ -861,6 +861,7 @@ Fixpoint clientKeySharesValid ks gs :=
 Parameter extension_SupportedGroups : list ExtensionRaw -> option (list Group).
 Parameter pskkey : option ByteString.
 
+Definition fl := 1000.
 Definition doHandshake (fuel:nat) (cch: CertificateChain)(pr: PrivateKey)(_: rets_tls)
   : t (const_yield args_tls) (const_yield rets_tls) (option unit) :=
   Def (fun al => _ <- yield Close $ (Alert_Fatal, al);
@@ -1054,23 +1055,25 @@ Definition doHandshake (fuel:nat) (cch: CertificateChain)(pr: PrivateKey)(_: ret
                             sessionMaxEarlyDataSize := 5;
                             sessionFlags := []
                          |});
-      _ <- yield SendPacket $ pac;
+                 _ <- yield SendPacket $ pac;
+                 (*
     data <- yield RecvAppData;
     x <- yield SendPacket $ (PAppData (mconcat ([s2b ("HTTP/1.1 200 OK" ++ CR ++ LF ++ "Content-Type: text/plain" ++ CR ++ LF ++ CR ++ LF ++ "Hello, "); data; s2b ("!" ++ CR ++ LF)])));
     _ <- yield Close $ (Alert_Warning, CloseNotify); Return None
+*)
       (*
     _ <- yield SendPacket $ pac;
     _ <- yield Close $ tt;
     Return tt
 *)
-(*    nat_rect_nondep
-      (fun _ => Return tt)
+    nat_rect_nondep
+      (fun _ => _ <- yield Close $ (Alert_Warning, CloseNotify); Return None)
       (fun _ rec _ =>
-         data <- yield RecvAppData $ (Some (usedHash, cipher, clientApplicationSecret));
-         x <- yield SendPacket $ (PAppData13 (mconcat ([s2b ("HTTP/1.1 200 OK" ++ CR ++ LF ++ "Content-Type: text/plain" ++ CR ++ LF ++ CR ++ LF ++ "Hello, "); data; s2b ("!" ++ CR ++ LF)])), Some (usedHash, cipher, serverApplicationSecret));
+         data <- yield RecvAppData;
+         x <- yield SendPacket $ (PAppData (mconcat ([s2b ("HTTP/1.1 200 OK" ++ CR ++ LF ++ "Content-Type: text/plain" ++ CR ++ LF ++ "Content-Length: 6" ++ CR ++ LF ++ CR ++ LF ++ "Hello!" ++ CR ++ LF)])));
          rec tt)
-      fuel tt
- *)
+      fl tt
+
   else
     alert DecryptError)
 .
@@ -1081,25 +1084,18 @@ Definition doHandshake_derive :
                 { init | @equiv_coro _ _ _ _ _ state step init (doHandshake fuel certs priv) } } }.
 Proof.
   do 3 eexists.
-
+(*
   unfold doHandshake.
   intros.
   Time unshelve derive_coro (tt,fuel,certs,priv); intros; exact inhabitant.
   Time Defined.
-
-(* doHandshake_derive is defined
-
-<infomsg>Finished transaction in 7750.321 secs (3605.643u,923.522s) (successful)
-</infomsg>
 *)
-(*
   lazymatch goal with
     |- ?x => assert x
   end.
   unfold doHandshake.
   intros.
   Time unshelve derive_coro (tt,fuel,certs,priv); intros; exact inhabitant.
-  Set Printing Depth 100.
   
   lazymatch goal with
     |- @equiv_coro _ _ _ _ _ ?state ?step _ _ =>
@@ -1118,14 +1114,14 @@ Proof.
 
 Axiom doHandshake_equiv : forall fuel certs keys,
   equiv_coro doHandshake_step (inl (tt,fuel,certs,keys)) (doHandshake fuel certs keys).
-*)
 
+(*
 Definition doHandshake_step := projT1 (projT2 doHandshake_derive).
 
 Definition doHandshake_equiv fuel certs keys :
   equiv_coro doHandshake_step (inl (tt,fuel,certs,keys)) (doHandshake fuel certs keys) :=
   proj2_sig (projT2 (projT2 doHandshake_derive) fuel certs keys).
-
+*)
 
 Hint Resolve doHandshake_equiv : equivc.
 
@@ -1284,7 +1280,7 @@ Definition readWrite fuel certs keys(_: rets_tls) : t (const_yield _) (const_yie
   nat_rect_nondep
     (fun _ => Return None)
     (fun _ rec (ctx: option (Hash * Cipher * ByteString * nat) * option (Hash * Cipher * ByteString * nat) * option (RecvType * (ByteString * option (ByteString -> ParseResult (HandshakeType * ByteString)))) * ByteString * rets_tls * coro_type doHandshake_step) =>
-       _ <- yield (getRandomBytes 0); (* needed for compiler limitation *)
+
        match ctx with
        | (recvinfo,sendinfo,omtype,bs,a,c) =>
        match omtype with
@@ -1292,6 +1288,7 @@ Definition readWrite fuel certs keys(_: rets_tls) : t (const_yield _) (const_yie
          r <- resume c $ a;
          match isRecvPacket r with
          | Some mtype =>
+           _ <- yield (getRandomBytes 0); (* needed for compiler limitation *)
            rec (recvinfo, sendinfo, Some (mtype, (empty, None)), bs, a, c)
          | None =>
            match isSendPacket r with
@@ -1320,8 +1317,10 @@ Definition readWrite fuel certs keys(_: rets_tls) : t (const_yield _) (const_yie
              | None =>
                match isSetSecret r with
                | Some (q, true) =>
+                 _ <- yield (getRandomBytes 0); (* needed for compiler limitation *)
                  rec (Some (q,0), sendinfo, None, bs, FromSetSecret, c)
                | Some (q, false) =>
+                 _ <- yield (getRandomBytes 0); (* needed for compiler limitation *)
                  rec (recvinfo, Some (q,0), None, bs, FromSetSecret, c)
                | None =>
                  a' <- yield r;
@@ -1337,7 +1336,9 @@ Definition readWrite fuel certs keys(_: rets_tls) : t (const_yield _) (const_yie
          else
            let (hd,rest) := Bsplit 5 bs in
            match decodeHeader hd with
-           | inl al => rec (recvinfo, sendinfo, None, rest, RetAlert (Alert_Fatal, al), c)
+           | inl al =>
+             _ <- yield (getRandomBytes 0); (* needed for compiler limitation *)
+             rec (recvinfo, sendinfo, None, rest, RetAlert (Alert_Fatal, al), c)
            | inr hdr =>
              let maxSize := match recvinfo with
                             | None => maxPlaintextSize
@@ -1345,6 +1346,7 @@ Definition readWrite fuel certs keys(_: rets_tls) : t (const_yield _) (const_yie
                             end
              in
              if Nat.ltb maxSize (hdReadLen hdr) then
+               _ <- yield (getRandomBytes 0); (* needed for compiler limitation *)
                rec (recvinfo, sendinfo, None, empty, RetAlert (Alert_Fatal, RecordOverflow), c)
              else if Nat.ltb (Blength rest) (hdReadLen hdr) then
                bs' <- yield RecvData $ tt;
@@ -1352,22 +1354,28 @@ Definition readWrite fuel certs keys(_: rets_tls) : t (const_yield _) (const_yie
              else
                let (msg,rest') := Bsplit (hdReadLen hdr) rest in
                if CProtocolType_beq CProtocolType_ChangeCipherSpec (hdProtocolType hdr) then
+                 _ <- yield (getRandomBytes 0); (* needed for compiler limitation *)
                  rec (recvinfo, sendinfo, Some (mtype, bocont), rest', a, c)
                else
                  oa' <<- decode bocont hdr msg mtype recvinfo;
                  match oa' with
-                 | None => rec (recvinfo, sendinfo, Some (mtype, bocont), rest', a, c)
+                 | None =>
+                   _ <- yield (getRandomBytes 0); (* needed for compiler limitation *)
+                   rec (recvinfo, sendinfo, Some (mtype, bocont), rest', a, c)
                  | Some (inr a') =>
                    match recvinfo with
                    | Some (q, num) =>
+                     _ <- yield (getRandomBytes 0); (* needed for compiler limitation *)
                      rec (Some (q, S num), sendinfo, None, rest', a', c)
                    | None => rec (None, sendinfo, None, rest', a', c)
                    end
                  | Some (inl (b,cont)) =>
                    match recvinfo with
                    | Some (q, num) =>
+                     _ <- yield (getRandomBytes 0); (* needed for compiler limitation *)
                      rec (Some (q, S num), sendinfo, Some (mtype, (b,Some cont)), rest', a, c)
                    | None =>
+                     _ <- yield (getRandomBytes 0); (* needed for compiler limitation *)
                      rec (recvinfo, sendinfo, Some (mtype, (b,Some cont)), rest', a, c)
                    end
                  end
@@ -1530,15 +1538,17 @@ Definition main_loop fuel fuel' fuel'' certs keys :=
                   let (rm,coro) := (rmcoro : rets_tls * Map SessionData * coro_type readWrite_step) in
                   let (r,m) := (rm : rets_tls * Map SessionData) in
                   ef <- resume coro $ r;
-                  _ <- skip tt;
+
                   match isSetPSK ef with
                   | Some (sid,sess) =>
                     let m' := insert sid sess m in
+                    _ <- skip tt;
                     rec_inner (FromSetPSK,m', coro)
                   | None =>
                     match isSessionResume ef with
                     | Some sid =>
                       let (sess,m') := lookupAndDelete sid m in
+                      _ <- skip tt;
                       rec_inner (FromSessionResume sess, m', coro)
                     | None =>
                       _ <- perform (sa,ef);

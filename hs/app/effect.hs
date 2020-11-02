@@ -5,6 +5,8 @@ import Control.Monad
 import Control.Concurrent
 import Data.IORef
 import Data.List
+import System.Random
+import qualified Data.Map as Map
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8 as C
 import Network.Socket
@@ -25,18 +27,26 @@ main :: IO ()
 main = withSocketsDo $ do
   args <- getArgs
   ecred <- credentialLoadX509 (args !! 0) (args !! 1)
-  newAccepts <- newIORef []
+  --newAccepts <- newIORef []
+  newAccepts <- newEmptyMVar
   received <- newEmptyMVar
   case ecred of
     Right (cert,priv) -> do
       sock <- socket AF_INET Stream 0
       bind sock (SockAddrInet 4433 iNADDR_ANY)  
       listen sock 2
-      forkIO (core [] (Left ((((((),100000), 100000), 100000), cert), priv)) Receive (unsafeCoerce ()) newAccepts received )
+      forkIO (core Map.empty (Left ((((((),1000000), 1000000), 1000000), cert), priv)) Receive (unsafeCoerce ()) newAccepts received)
       forever $ do
         (s,a) <- accept sock
-        modifyIORef newAccepts $ \l -> (s,show a):l
-        putStrLn (show a)
+        ac <- tryTakeMVar newAccepts
+        case ac of
+          Nothing ->
+            putMVar newAccepts (Left (s, show a))
+          Just ac' -> do
+            putMVar newAccepts (Left (s, show a))
+            putStrLn (show a)
+            putMVar newAccepts ac'
+--        modifyIORef newAccepts $ \l -> (s,show a):l
     Left s ->
       putStrLn s
 
@@ -45,77 +55,120 @@ core sock x ef (r::Any) newAccepts received = do
     Right res -> do
       print res
       putStrLn "\nDone"
-      forM_ sock (\(_,s) -> close s)
-    Left (next, Nothing) -> core sock next Skip (unsafeCoerce ()) newAccepts received 
+      forM_ sock (\s -> close s)
+    Left (next, Nothing) -> core sock next Skip (unsafeCoerce ()) newAccepts received
     Left (next, Just (ExistT e a)) ->
       case e of
-        Skip -> core sock next Skip (unsafeCoerce ()) newAccepts received 
+        Skip -> do
+          core sock next Skip (unsafeCoerce ()) newAccepts received
         Accept -> do
-          l <- readIORef newAccepts
+          l <- takeMVar newAccepts
           case l of
-            [] -> threadDelay 10000 >> core sock next Accept (unsafeCoerce Nothing) newAccepts received 
-            (s,adr):l' -> do
-              writeIORef newAccepts l'
+            Left (s,adr) -> do
               putStrLn $ " accepted" ++ show adr
-              core ((adr,s):sock) next Accept (unsafeCoerce (Just adr)) newAccepts received 
+              x <- randomRIO (0,9) :: IO Int
+              let adr' = show x ++ adr
+              core (Map.insert adr' s sock) next Accept (unsafeCoerce (Just adr')) newAccepts received
+            Right r -> do
+              forkIO $ putMVar received r
+              core sock next Accept (unsafeCoerce Nothing) newAccepts received
+          --l <- readIORef newAccepts
+          --case l of
+          --  [] -> threadDelay 10000 >> core sock next Accept (unsafeCoerce Nothing) newAccepts received 
+          --  (s,adr):l' -> do
+          --    writeIORef newAccepts l'
+          --    putStrLn $ " accepted" ++ show adr
+          --    core ((adr,s):sock) next Accept (unsafeCoerce (Just adr)) newAccepts received 
         Receive -> do
-          r <- tryTakeMVar received
+          r <- takeMVar received
           case r of
-            (Just (adr,p)) ->
-              case lookup adr sock of
+            (adr,p) ->
+              case Map.lookup adr sock of
                 Just _ -> do
                   --putStrLn $ " received " ++ show adr
-                  core sock next Receive (unsafeCoerce r) newAccepts received 
+                  core sock next Receive (unsafeCoerce (Just r)) newAccepts received
                 Nothing -> do
                   --putStrLn $ " received but not found " ++ show adr
-                  core sock next Receive (unsafeCoerce Nothing) newAccepts received 
-            Nothing -> core sock next Receive (unsafeCoerce Nothing) newAccepts received 
+                  core sock next Receive (unsafeCoerce Nothing) newAccepts received
+            --Nothing -> core sock next Receive (unsafeCoerce Nothing) newAccepts received 
         Perform -> do
           let (adr,ea) = unsafeCoerce a :: (String, Args_tls)
-          --putStrLn $ " perform " ++ show adr
+          putStrLn $ " perform " ++ show adr
           case ea of
+            RecvPacket _ -> do
+              putStrLn "Start"
+              forkIO (putMVar newAccepts (Right (adr, FromSetPSK)))
+              core sock next Perform (unsafeCoerce FromSetPSK) newAccepts received
             RecvData a' -> do
               putStrLn "RecvData"
-              case lookup adr sock of
-                Just s -> do
-                  forkIO $ do
-                    ch <- SB.recv s (16384 + 256)
-                    putStrLn $ show $ toLazyByteString $ byteStringHex ch
-                    putMVar received (adr, FromRecvData ch)
-                  return ()
-                Nothing -> error "no socket"
-            GetRandomBytes a' ->
-              putStrLn (if a' == 0 then "Skip" else "GetRandomBytes") >> (if a' == 0 then return "" else getRandomBytes a') >>= \(v::B.ByteString) -> forkIO (putMVar received (adr, FromGetRandomBytes v)) >> return ()
-            SendData a' ->
-              case lookup adr sock of
-                Just s -> do
-                  let (pkt,m) = a' :: (I.Packet13, Maybe (((TLS.Hash,TLS.Cipher),B.ByteString),Int))
-                  putStrLn $ "SendPacket " ++ show pkt
-                  let encoded =
-                        case pkt of
-                          I.Handshake13 [hs] -> I.encodeHandshake13 hs
-                          I.ChangeCipherSpec13 -> I.encodeChangeCipherSpec
-                  bs <- encodePacket13 (pkt,m)
-                  case bs of
-                    Right b -> do
-                          forkIO $ SB.sendAll s b >> (putMVar received (adr, FromSendPacket encoded))
-                          return ()
-            GroupGetPubShared a' ->
-              I.groupGetPubShared a' >>= \p -> forkIO (putMVar received ((adr,(FromGroupGetPubShared p)))) >> return ()
-            MakeCertVerify a' ->
-              makeCertVerify a' >>= \c -> forkIO (putMVar received ((adr,(FromMakeCertVerify c)))) >> return ()
+              let s = sock Map.! adr
+              --case lookup adr sock of
+                --Just s -> do
+              forkIO $ do
+                ch <- SB.recv s (16384 + 256)
+                putStrLn $ show $ toLazyByteString $ byteStringHex ch
+                putMVar newAccepts (Right (adr, FromRecvData ch))
+              return ()
+              --  Nothing -> error "no socket"
+              core sock next Perform (unsafeCoerce FromSetPSK) newAccepts received
+            GetRandomBytes a' -> do
+              putStrLn (if a' == 0 then "Skip" else "GetRandomBytes")
+              v <- if a' == 0 then return "" else getRandomBytes a'
+              core sock next Perform (unsafeCoerce (FromGetRandomBytes v)) newAccepts received 
+              --forkIO (putMVar newAccepts (Right (adr, FromGetRandomBytes v)))
+              --core sock next Perform (unsafeCoerce ()) newAccepts received 
+            SendData a' -> do
+              let s = sock Map.! adr
+              --case lookup adr sock of
+              --  Just s -> do
+              let (pkt,m) = a' :: (I.Packet13, Maybe (((TLS.Hash,TLS.Cipher),B.ByteString),Int))
+              putStrLn $ "SendPacket " ++ show pkt
+              let (sending,encoded) =
+                    case pkt of
+                      I.Handshake13 [hs] ->
+                        case hs of
+                          I.Finished13 _ -> (True, I.encodeHandshake13 hs)
+                          _ -> (False, I.encodeHandshake13 hs)
+                      I.ChangeCipherSpec13 -> (False, I.encodeChangeCipherSpec)
+              bs <- encodePacket13 (pkt,m)
+              case bs of
+                Right b -> do
+                  SB.sendAll s b
+                  core sock next Perform (unsafeCoerce $ FromSendPacket encoded) newAccepts received
+--                      case Map.lookup adr toSends of
+--                        Just msg ->
+--                          if sending then do
+--                            let toSends' = Map.update (\_ -> Nothing) adr toSends
+--                            --forkIO $ SB.sendAll s (B.append msg b) >> (putMVar newAccepts (Right (adr, FromSendPacket encoded)))
+--                            SB.sendAll s (B.append msg b)
+--                            core sock next Perform (unsafeCoerce $ FromSendPacket encoded) newAccepts received toSends'
+--                          else do
+--                            let toSends' = Map.update(\msg -> Just (B.append msg b)) adr toSends
+--                            --forkIO $ putMVar newAccepts (Right (adr, FromSendPacket encoded))
+--                            core sock next Perform (unsafeCoerce $ FromSendPacket encoded) newAccepts received toSends'
+--                        Nothing -> do
+--                          --forkIO $ SB.sendAll s b >> (putMVar newAccepts (Right (adr, FromSendPacket encoded)))
+--                          SB.sendAll s b
+--                          core sock next Perform (unsafeCoerce $ FromSendPacket encoded) newAccepts received toSends
+            GroupGetPubShared a' -> do
+              p <- I.groupGetPubShared a'
+              --forkIO (putMVar newAccepts (Right (adr,(FromGroupGetPubShared p))))
+              core sock next Perform (unsafeCoerce $ FromGroupGetPubShared p) newAccepts received 
+            MakeCertVerify a' -> do
+              c <- makeCertVerify a'
+              --forkIO (putMVar newAccepts (Right (adr,(FromMakeCertVerify c))))
+              core sock next Perform (unsafeCoerce $ FromMakeCertVerify c) newAccepts received 
             CloseWith a' -> do
               putStrLn $ "Close" ++ show a'
-              case lookup adr sock of
-                Just s -> close s >> core (delete (adr,s) sock) next Perform (unsafeCoerce ()) newAccepts received
+              let s = sock Map.! adr
+              --case lookup adr sock of
+              --  Just s ->
+              close s >> core (Map.delete adr sock) next Perform (unsafeCoerce FromSetPSK) newAccepts received 
             GetCurrentTime a' -> do
+              time <- getCurrentTimeFromBase
               putStrLn "GetCurrentTime"              
-              getCurrentTimeFromBase >>= \time -> forkIO (putMVar received ((adr,FromGetCurrentTime time))) >> return ()
-              
-
-          case ea of
-            CloseWith _ -> return ()
-            _ -> core sock next Perform (unsafeCoerce ()) newAccepts received 
+              --forkIO (putMVar newAccepts (Right (adr,FromGetCurrentTime time)))
+              core sock next Perform (unsafeCoerce $ FromGetCurrentTime time) newAccepts received 
 
 recvBytes :: Socket -> Int -> IO B.ByteString
 recvBytes sock n = B.concat <$> loop n

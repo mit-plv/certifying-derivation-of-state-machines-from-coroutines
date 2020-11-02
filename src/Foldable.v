@@ -352,6 +352,33 @@ Fixpoint replace_map A key a0 (t : Map A) :=
   | Leaf _ => Leaf _
   end.
 
+Fixpoint deleteHelper A node (l r : Map A) : (String.string * A) * Map A :=
+  match l with
+  | Leaf _ => (node, r)
+  | Node node' l' r' =>
+    let (n, new) := deleteHelper node' l' r' in
+    (n, Node node new r)
+  end.
+
+Fixpoint delete A key (t : Map A) :=
+    match t with
+    | Leaf _ => Leaf _
+    | Node (x,a) l r =>
+      match compareString key x with
+      | Eq =>
+        match l,r with
+        | Leaf _, Leaf _ => Leaf _
+        | Leaf _, _ => r
+        | _, Leaf _ => l
+        | _, Node n l' r' =>
+          let (node, newr) := deleteHelper n l' r' in
+          Node node l newr
+        end
+      | Lt => Node (x,a) (delete key l) r
+      | Gt => Node (x,a) l (delete key r)
+      end
+    end.
+
 Fixpoint foldr_map (A B:Set) (f : A -> B -> B)(init : B)(t : Map A) :=
   match t with
   | Node (k,a) l r => foldr_map f (f a (foldr_map f init r)) l
@@ -734,6 +761,6 @@ Proof.
   constructor.
 Qed.
 
-Instance Map_inhabitant A : Inhabit (Map A) := { inhabitant := Leaf _ }.
+  Instance Map_inhabitant A : Inhabit (Map A) := { inhabitant := Leaf _ }.
 
 Hint Resolve GenForall2_bsearch_Some_None GenForall2_bsearch_None_Some GenForall2_replace_map : foldable.
