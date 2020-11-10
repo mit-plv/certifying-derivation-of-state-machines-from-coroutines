@@ -1334,10 +1334,10 @@ Definition readWrite fuel certs keys(_: rets_tls) : t (const_yield _) (const_yie
            bs' <- yield RecvData $ tt;
            rec (recvinfo, sendinfo, Some (mtype, bocont), mconcat [bs; bs'], a, c)
          else
+           _ <- yield (getRandomBytes 0); (* needed for compiler limitation *)
            let (hd,rest) := Bsplit 5 bs in
            match decodeHeader hd with
            | inl al =>
-             _ <- yield (getRandomBytes 0); (* needed for compiler limitation *)
              rec (recvinfo, sendinfo, None, rest, RetAlert (Alert_Fatal, al), c)
            | inr hdr =>
              let maxSize := match recvinfo with
@@ -1346,7 +1346,6 @@ Definition readWrite fuel certs keys(_: rets_tls) : t (const_yield _) (const_yie
                             end
              in
              if Nat.ltb maxSize (hdReadLen hdr) then
-               _ <- yield (getRandomBytes 0); (* needed for compiler limitation *)
                rec (recvinfo, sendinfo, None, empty, RetAlert (Alert_Fatal, RecordOverflow), c)
              else if Nat.ltb (Blength rest) (hdReadLen hdr) then
                bs' <- yield RecvData $ tt;
@@ -1354,28 +1353,23 @@ Definition readWrite fuel certs keys(_: rets_tls) : t (const_yield _) (const_yie
              else
                let (msg,rest') := Bsplit (hdReadLen hdr) rest in
                if CProtocolType_beq CProtocolType_ChangeCipherSpec (hdProtocolType hdr) then
-                 _ <- yield (getRandomBytes 0); (* needed for compiler limitation *)
                  rec (recvinfo, sendinfo, Some (mtype, bocont), rest', a, c)
                else
                  oa' <<- decode bocont hdr msg mtype recvinfo;
                  match oa' with
                  | None =>
-                   _ <- yield (getRandomBytes 0); (* needed for compiler limitation *)
                    rec (recvinfo, sendinfo, Some (mtype, bocont), rest', a, c)
                  | Some (inr a') =>
                    match recvinfo with
                    | Some (q, num) =>
-                     _ <- yield (getRandomBytes 0); (* needed for compiler limitation *)
                      rec (Some (q, S num), sendinfo, None, rest', a', c)
                    | None => rec (None, sendinfo, None, rest', a', c)
                    end
                  | Some (inl (b,cont)) =>
                    match recvinfo with
                    | Some (q, num) =>
-                     _ <- yield (getRandomBytes 0); (* needed for compiler limitation *)
                      rec (Some (q, S num), sendinfo, Some (mtype, (b,Some cont)), rest', a, c)
                    | None =>
-                     _ <- yield (getRandomBytes 0); (* needed for compiler limitation *)
                      rec (recvinfo, sendinfo, Some (mtype, (b,Some cont)), rest', a, c)
                    end
                  end
@@ -1450,7 +1444,7 @@ Definition args_conn (e : eff_conn) :=
 Definition rets_conn (e : eff_conn) :=
   match e with
   | accept => option string
-  | perform => unit
+  | perform => rets_tls
   | receive => option (string * rets_tls)
   | skip => unit
   end.
@@ -1477,6 +1471,23 @@ Definition isSetPSK (x : args_tls) :=
 Definition isSessionResume (x : args_tls) :=
   match x with
   | sessionResume a => Some a
+  | _ => None
+  end.
+
+Definition isRecvDataOrClose (x : args_tls) :=
+  match x with
+  | recvData _ => Some tt
+  | closeWith _ => Some tt
+  | _ => None
+  end.
+
+Definition isSkip (x : args_tls) :=
+  match x with
+  | getRandomBytes n =>
+    if Nat.eqb n 0 then
+      Some tt
+    else
+      None
   | _ => None
   end.
 
@@ -1511,6 +1522,8 @@ Definition lookupAndDelete {A : Set} key (m : Map A) :=
 
 Opaque readWrite_step.
 
+Definition Start := recvPacket RCCS.
+
 Definition main_loop fuel fuel' fuel'' certs keys :=
   nat_rect_nondep
     (fun _ => Return (@None unit))
@@ -1521,10 +1534,10 @@ Definition main_loop fuel fuel' fuel'' certs keys :=
          | Some sa =>
            pipe (readWrite fuel' certs keys : coro_type readWrite_step)
                 (fun c =>
-                   ef <- resume c $ inhabitant;
-                     _ <- perform (sa, ef);
-                     let coros' := insert sa c coros in
-                     rec (m, coros'))
+(*                   ef <- resume c $ inhabitant;*)
+                   _ <- perform (sa, Start);
+                   let coros' := insert sa c coros in
+                   rec (m, coros'))
          | None =>
            osar <- receive tt;
            match osar with
@@ -1538,12 +1551,11 @@ Definition main_loop fuel fuel' fuel'' certs keys :=
                   let (rm,coro) := (rmcoro : rets_tls * Map SessionData * coro_type readWrite_step) in
                   let (r,m) := (rm : rets_tls * Map SessionData) in
                   ef <- resume coro $ r;
-
                   match isSetPSK ef with
                   | Some (sid,sess) =>
                     let m' := insert sid sess m in
                     _ <- skip tt;
-                    rec_inner (FromSetPSK,m', coro)
+                      rec_inner (FromSetPSK,m', coro)
                   | None =>
                     match isSessionResume ef with
                     | Some sid =>
@@ -1551,9 +1563,15 @@ Definition main_loop fuel fuel' fuel'' certs keys :=
                       _ <- skip tt;
                       rec_inner (FromSessionResume sess, m', coro)
                     | None =>
-                      _ <- perform (sa,ef);
-                      let coros' := replace_map sa coro coros in
-                      rec (m, coros')
+                      match isRecvDataOrClose ef with
+                      | Some _ =>
+                        _ <- perform (sa,ef);
+                        let coros' := replace_map sa coro coros in
+                        rec (m, coros')
+                      | None =>
+                        r <- perform (sa,ef);
+                        rec_inner (r, m, coro)
+                      end
                     end
                   end)
                fuel'' (r, m, coro)

@@ -12,6 +12,7 @@ import qualified Helper
 import qualified Data.X509 as X
 import qualified Crypto.PubKey.RSA as RSA
 import qualified Data.Char
+import qualified Data.List
 import qualified Data.Word8
 import qualified Data.Word
 import qualified Data.Bits
@@ -41,7 +42,7 @@ type Any = ()
 #endif
 
 __ :: any
-__ = Prelude.error "Logical or arity value used"
+__ = unsafeCoerce ()--Prelude.error "Logical or arity value used"
 
 andb :: GHC.Base.Bool -> GHC.Base.Bool -> GHC.Base.Bool
 andb b1 b2 =
@@ -66,6 +67,7 @@ snd p =
    (,) _ y -> y}
 
 prod_curry :: (a1 -> a2 -> a3) -> ((,) a1 a2) -> a3
+{-# INLINE prod_curry #-}
 prod_curry f p =
   case p of {
    (,) x y -> f x y}
@@ -102,32 +104,36 @@ data SigT a p =
 
 add :: GHC.Base.Int -> GHC.Base.Int -> GHC.Base.Int
 add n m =
-  (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
-    (\_ -> m)
-    (\p -> (Prelude.+) 1 (add p m))
-    n
+  n Prelude.+ m
+--  (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
+--    (\_ -> m)
+--    (\p -> (Prelude.+) 1 (add p m))
+--    n
 
 sub :: GHC.Base.Int -> GHC.Base.Int -> GHC.Base.Int
 sub n m =
-  (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
-    (\_ -> n)
-    (\k ->
-    (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
-      (\_ -> n)
-      (\l -> sub k l)
-      m)
-    n
+  let k = n Prelude.- m in
+  if k Prelude.< 0 then 0 else k
+--  (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
+--    (\_ -> n)
+--    (\k ->
+--    (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
+--      (\_ -> n)
+--      (\l -> sub k l)
+--      m)
+--    n
 
 leb :: GHC.Base.Int -> GHC.Base.Int -> GHC.Base.Bool
 leb n m =
-  (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
-    (\_ -> GHC.Base.True)
-    (\n' ->
-    (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
-      (\_ -> GHC.Base.False)
-      (\m' -> leb n' m')
-      m)
-    n
+  n Prelude.<= m
+--  (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
+--    (\_ -> GHC.Base.True)
+--    (\n' ->
+--    (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
+--      (\_ -> GHC.Base.False)
+--      (\m' -> leb n' m')
+--      m)
+--    n
 
 ltb :: GHC.Base.Int -> GHC.Base.Int -> GHC.Base.Bool
 ltb n m =
@@ -135,18 +141,23 @@ ltb n m =
 
 compare :: GHC.Base.Int -> GHC.Base.Int -> Comparison
 compare n m =
-  (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
-    (\_ ->
-    (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
-      (\_ -> Eq)
-      (\_ -> Lt)
-      m)
-    (\n' ->
-    (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
-      (\_ -> Gt)
-      (\m' -> compare n' m')
-      m)
-    n
+  case Prelude.compare n m of
+    Prelude.LT -> Lt
+    Prelude.GT -> Gt
+    Prelude.EQ -> Eq
+--    
+--  (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
+--    (\_ ->
+--    (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
+--      (\_ -> Eq)
+--      (\_ -> Lt)
+--      m)
+--    (\n' ->
+--    (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
+--      (\_ -> Gt)
+--      (\m' -> compare n' m')
+--      m)
+--    n
 
 hd_error :: (([]) a1) -> GHC.Base.Maybe a1
 hd_error l =
@@ -164,33 +175,37 @@ in_dec h a l =
 
 map :: (a1 -> a2) -> (([]) a1) -> ([]) a2
 map f l =
-  case l of {
-   [] -> [];
-   (:) a t -> (:) (f a) (map f t)}
+  Prelude.map f l
+--  case l of {
+--   [] -> [];
+--   (:) a t -> (:) (f a) (map f t)}
 
 fold_left :: (a1 -> a2 -> a1) -> (([]) a2) -> a1 -> a1
 fold_left f l a0 =
-  case l of {
-   [] -> a0;
-   (:) b t -> fold_left f t (f a0 b)}
+  Data.List.foldl' f a0 l
+--  case l of {
+--   [] -> a0;
+--   (:) b t -> fold_left f t (f a0 b)}
 
 filter :: (a1 -> GHC.Base.Bool) -> (([]) a1) -> ([]) a1
 filter f l =
-  case l of {
-   [] -> [];
-   (:) x l0 ->
-    case f x of {
-     GHC.Base.True -> (:) x (filter f l0);
-     GHC.Base.False -> filter f l0}}
+  Prelude.filter f  l
+--  case l of {
+--   [] -> [];
+--   (:) x l0 ->
+--    case f x of {
+--     GHC.Base.True -> (:) x (filter f l0);
+--     GHC.Base.False -> filter f l0}}
 
 find :: (a1 -> GHC.Base.Bool) -> (([]) a1) -> GHC.Base.Maybe a1
 find f l =
-  case l of {
-   [] -> GHC.Base.Nothing;
-   (:) x tl ->
-    case f x of {
-     GHC.Base.True -> GHC.Base.Just x;
-     GHC.Base.False -> find f tl}}
+  Data.List.find f l
+--  case l of {
+--   [] -> GHC.Base.Nothing;
+--   (:) x tl ->
+--    case f x of {
+--     GHC.Base.True -> GHC.Base.Just x;
+--     GHC.Base.False -> find f tl}}
 
 data Positive =
    XI Positive
@@ -336,16 +351,20 @@ compareAscii x y =
 
 compareString :: Prelude.String -> Prelude.String -> Comparison
 compareString x y =
-  case x of {
-   ([]) -> case y of {
-            ([]) -> Eq;
-            (:) _ _ -> Lt};
-   (:) c x' ->
-    case y of {
-     ([]) -> Gt;
-     (:) d y' -> case compareAscii c d of {
-                  Eq -> compareString x' y';
-                  x0 -> x0}}}
+  case Prelude.compare x y of
+    Prelude.EQ -> Eq
+    Prelude.LT -> Lt
+    Prelude.GT -> Gt
+--  case x of {
+--   ([]) -> case y of {
+--            ([]) -> Eq;
+--            (:) _ _ -> Lt};
+--   (:) c x' ->
+--    case y of {
+--     ([]) -> Gt;
+--     (:) d y' -> case compareAscii c d of {
+--                  Eq -> compareString x' y';
+--                  x0 -> x0}}}
 
 lebString :: Prelude.String -> Prelude.String -> GHC.Base.Bool
 lebString x y =
@@ -377,28 +396,38 @@ bsearch key t =
    Leaf -> GHC.Base.Nothing}
 
 replace_map :: Prelude.String -> a1 -> (Map a1) -> Map a1
-replace_map key a0 t =
-  case t of {
-   Node p l r ->
-    case p of {
-     (,) x a ->
-      case compareString key x of {
-       Eq -> Node ((,) key a0) l r;
-       Lt -> Node ((,) x a) (replace_map key a0 l) r;
-       Gt -> Node ((,) x a) l (replace_map key a0 r)}};
-   Leaf -> Leaf}
+replace_map key a0 = Prelude.seq key go
+  where
+    go (Node (k,a) l r) =
+      case compareString key k of
+        Eq -> Node (key,a0) l r
+        Lt -> Node (k,a) (go l) r
+        Gt -> Node (k,a) l (go r)
+--replace_map key a0 t =
+--  case t of {
+--   Node p l r ->
+--    case p of {
+--     (,) x a ->
+--      case compareString key x of {
+--       Eq -> Node ((,) key a0) l r;
+--       Lt -> Node ((,) x a) (replace_map key a0 l) r;
+--       Gt -> Node ((,) x a) l (replace_map key a0 r)}};
+--   Leaf -> Leaf}
 
 let_ :: a1 -> (a1 -> a2) -> a2
+{-# INLINE let_ #-}
 let_ x f =
   f x
 
 sum_merge :: (a1 -> a3) -> (a2 -> a3) -> (Prelude.Either a1 a2) -> a3
+{-# INLINE sum_merge #-}
 sum_merge f g x =
   case x of {
    Prelude.Left a -> f a;
    Prelude.Right b -> g b}
 
 option_branch :: (a1 -> a2) -> a2 -> (GHC.Base.Maybe a1) -> a2
+{-# INLINE option_branch #-}
 option_branch f f0 o =
   case o of {
    GHC.Base.Just a -> f a;
@@ -445,10 +474,11 @@ findKeyShare ks gs =
 
 intersect :: (([]) T.Group) -> (([]) T.Group) -> ([]) T.Group
 intersect xs ys =
-  filter (\x ->
-    case in_dec group_eq_dec x ys of {
-     GHC.Base.True -> GHC.Base.True;
-     GHC.Base.False -> GHC.Base.False}) xs
+  Data.List.intersect xs ys
+--  filter (\x ->
+--    case in_dec group_eq_dec x ys of {
+--     GHC.Base.True -> GHC.Base.True;
+--     GHC.Base.False -> GHC.Base.False}) xs
 
 type Word8 = Data.Word8.Word8
 
@@ -906,12 +936,13 @@ pskKexMode_beq x y =
 
 find0 :: (a1 -> GHC.Base.Bool) -> (([]) a1) -> GHC.Base.Maybe a1
 find0 f l =
-  case l of {
-   [] -> GHC.Base.Nothing;
-   (:) a l' ->
-    case f a of {
-     GHC.Base.True -> GHC.Base.Just a;
-     GHC.Base.False -> find0 f l'}}
+  Data.List.find f l
+--  case l of {
+--   [] -> GHC.Base.Nothing;
+--   (:) a l' ->
+--    case f a of {
+--     GHC.Base.True -> GHC.Base.Just a;
+--     GHC.Base.False -> find0 f l'}}
 
 extension_PreSharedKey :: (([]) ExtensionRaw) -> GHC.Base.Maybe I.PreSharedKey
 extension_PreSharedKey = \exts -> Helper.extensionLookup I.extensionID_PreSharedKey exts GHC.Base.>>= I.extensionDecode I.MsgTClientHello
@@ -937,7 +968,8 @@ extension_PreSharedKeyCH exts =
 
 sumnat :: (([]) GHC.Base.Int) -> GHC.Base.Int
 sumnat l =
-  fold_left add l 0
+  Prelude.sum l
+--  fold_left add l 0
 
 b2s :: ByteString -> Prelude.String
 b2s = (\b -> Prelude.map Data.ByteString.Internal.w2c (B.unpack b))
@@ -7071,9 +7103,7 @@ doHandshake_step x x0 =
                                                                            'l' ((:)
                                                                            'l' ((:)
                                                                            'o' ((:)
-                                                                           '!' ((:)
-                                                                           '\r'
-                                                                           lF))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))
+                                                                           '!' [])))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))
                                                                            []))))))
                                                                           (option_branch
                                                                            (\x1 ->
@@ -7784,16 +7814,18 @@ readWrite_step x x0 =
                           (Prelude.Right (Prelude.Right (Prelude.Right
                           (Prelude.Right GHC.Base.Nothing))))))))))))))))
                           (\n0' ->
-                          case ltb (blength (mconcat ((:) b ((:) x1 []))))
+                          let bx = B.append b x1 in
+                          case ltb (B.length bx)
+                          --case ltb (blength (mconcat ((:) b ((:) x1 [])) ))
                                  ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
                                  ((Prelude.+) 1 ((Prelude.+) 1 0))))) of {
                            GHC.Base.True -> Prelude.Right (Prelude.Left ((,) ((,)
                             ((,) ((,) ((,) ((,) ((,) ((,) () n0') d) r)
-                            (mconcat ((:) b ((:) x1 [])))) o) o0) r0) p));
+                            bx{-(mconcat ((:) b ((:) x1 [])))-}) o) o0) r0) p));
                            GHC.Base.False -> Prelude.Right (Prelude.Right
                             (Prelude.Right (Prelude.Left ((,) ((,) ((,) ((,) ((,)
                             ((,) ((,) ((,) () n0') d) r)
-                            (mconcat ((:) b ((:) x1 [])))) o) o0) r0) p))))})
+                            bx{-(mconcat ((:) b ((:) x1 [])))-}) o) o0) r0) p))))})
                           n)
                         (option_branch (\x1 -> Prelude.Right (Prelude.Right
                           (Prelude.Left ((,) () x1)))) (Prelude.Right (Prelude.Right
@@ -7808,7 +7840,9 @@ readWrite_step x x0 =
                         (\fO fS n -> if n GHC.Base.==0 then fO () else fS (n Prelude.- 1))
                           (\_ -> GHC.Base.Nothing)
                           (\_ ->
-                          case ltb (blength (mconcat ((:) b ((:) x1 []))))
+                          let bx = B.append b x1 in
+                          case ltb (B.length bx)
+                          --case ltb (blength (mconcat ((:) b ((:) x1 []))))
                                  ((Prelude.+) 1 ((Prelude.+) 1 ((Prelude.+) 1
                                  ((Prelude.+) 1 ((Prelude.+) 1 0))))) of {
                            GHC.Base.True -> GHC.Base.Just (ExistT __ (RecvData ()));
@@ -18685,22 +18719,24 @@ lookupAndDelete key m =
 
 lift_conn :: Eff_conn -> (Rets_conn -> Prelude.Either a1 (GHC.Base.Maybe a2)) ->
              Eff_conn -> Rets_conn -> Prelude.Either a1 (GHC.Base.Maybe a2)
-lift_conn e a e0 =
-  case e of {
-   Accept -> case e0 of {
-              Accept -> a;
-              _ -> (\_ -> Prelude.Right GHC.Base.Nothing)};
-   Perform ->
-    case e0 of {
-     Perform -> a;
-     _ -> (\_ -> Prelude.Right GHC.Base.Nothing)};
-   Receive ->
-    case e0 of {
-     Receive -> a;
-     _ -> (\_ -> Prelude.Right GHC.Base.Nothing)};
-   Skip -> case e0 of {
-            Skip -> a;
-            _ -> (\_ -> Prelude.Right GHC.Base.Nothing)}}
+{-# INLINE lift_conn #-}
+lift_conn _ a _ r = a r
+--lift_conn e a e0 =
+--  case e of {
+--   Accept -> case e0 of {
+--              Accept -> a;
+--              _ -> (\_ -> Prelude.Right GHC.Base.Nothing)};
+--   Perform ->
+--    case e0 of {
+--     Perform -> a;
+--     _ -> (\_ -> Prelude.Right GHC.Base.Nothing)};
+--   Receive ->
+--    case e0 of {
+--     Receive -> a;
+--     _ -> (\_ -> Prelude.Right GHC.Base.Nothing)};
+--   Skip -> case e0 of {
+--            Skip -> a;
+--            _ -> (\_ -> Prelude.Right GHC.Base.Nothing)}}
 
 main_loop_step :: (Prelude.Either
                   ((,)

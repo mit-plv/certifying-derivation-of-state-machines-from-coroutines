@@ -38,6 +38,11 @@ dependencies:
 - mtl
 - random
 - containers
+- warp
+
+default-extensions: Strict StrictData
+
+ghc-options: -O2 -funfolding-use-threshold=16
 
 library:
   source-dirs: src

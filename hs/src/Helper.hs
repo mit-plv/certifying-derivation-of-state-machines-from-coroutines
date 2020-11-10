@@ -16,7 +16,6 @@ import qualified Crypto.PubKey.RSA as RSA
 import qualified Crypto.PubKey.RSA.PSS as PSS
 import qualified Crypto.Hash.Algorithms as A
 import qualified Crypto.Hash as H
-import Certificate
 import Encrypt (newRecordOptions)
 import Debug.Trace
 import Data.ByteString.Builder (toLazyByteString, byteStringHex)
@@ -70,7 +69,7 @@ serverGroups :: ([]) Group
 serverGroups =
   supportedGroups'
 
-defaultCertChain pubKey = X.CertificateChain [simpleX509 $ PubKeyRSA pubKey]
+--defaultCertChain pubKey = X.CertificateChain [simpleX509 $ PubKeyRSA pubKey]
 
 parseHandshakeRecord :: Maybe (GetContinuation (HandshakeType13, B.ByteString)) -> B.ByteString -> GetResult (HandshakeType13, B.ByteString)
 parseHandshakeRecord mcont bs = fromMaybe decodeHandshakeRecord13 mcont bs
