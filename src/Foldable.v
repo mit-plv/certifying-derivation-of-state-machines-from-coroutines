@@ -292,7 +292,7 @@ Proof.
   econstructor; auto.
 Qed.
   
-Hint Resolve GenForall2_size nth_err_None nth_err_Some GenForall2_cons GenForall2_nth_None_Some GenForall2_nth_Some_None GenForall2_replace_list : foldable.
+Global Hint Resolve GenForall2_size nth_err_None nth_err_Some GenForall2_cons GenForall2_nth_None_Some GenForall2_nth_Some_None GenForall2_replace_list : foldable.
 
 
 Inductive Map A := Node : String.string * A -> Map A -> Map A -> Map A | Leaf.
@@ -761,6 +761,6 @@ Proof.
   constructor.
 Qed.
 
-  Instance Map_inhabitant A : Inhabit (Map A) := { inhabitant := Leaf _ }.
+Instance Map_inhabitant A : Inhabit (Map A) := { inhabitant := Leaf _ }.
 
-Hint Resolve GenForall2_bsearch_Some_None GenForall2_bsearch_None_Some GenForall2_replace_map : foldable.
+Global Hint Resolve GenForall2_bsearch_Some_None GenForall2_bsearch_None_Some GenForall2_replace_map : foldable.
