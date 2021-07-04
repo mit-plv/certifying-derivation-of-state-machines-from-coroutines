@@ -1,6 +1,6 @@
 Require String.
 Import String.StringSyntax.
-Require Import List FunctionalExtensionality Arith.
+Require Import List FunctionalExtensionality Arith Eqdep.
 Require Import StateMachines.Inhabit StateMachines.Foldable.
 Import ListNotations.
 Open Scope type_scope.
@@ -32,6 +32,248 @@ Section Effect.
   Definition equiv ret_type state (step : step_type ret_type state) init p :=
     exists op s, step init = (fun _ _ => inl (s, op)) /\ equiv' (ret_type := ret_type) step (fun s op o => (step s = fun _ _ => inr o) /\ op = None) s p op.
 
+  (** * Equivalence with bisimulation *)
+
+  (** Uniform notion of single-step observation *)
+  Record label := {
+    EffIs : eff;
+    Args : args EffIs;
+    Rets : rets EffIs
+  }.
+
+  (** ** High-level programs as labeled transition systems (LTSes) *)
+
+  Section bisimulation.
+    Variable ret_type : Set.
+
+    Definition high_state := t ret_type.
+    
+    Inductive high_final : high_state -> ret_type -> Prop :=
+    | High_Final : forall r,
+        high_final (Return r) r.
+
+    Inductive high_step : high_state -> label -> high_state -> Prop :=
+    | High_StepMore : forall e (a : args e) (r : rets e) k,
+        high_step (Eff a k) {|Args := a; Rets := r|} (k r).
+
+    (** ** State machines as LTSes *)
+
+    Variable state : Set.
+
+    Record low_state := {
+      State : state;
+      Op : option {e : eff & args e} (* precommit to this being next op? *)
+    }.
+    
+    Variable step : step_type ret_type state.
+    
+    Inductive low_final : low_state -> ret_type -> Prop :=
+    | Low_Final : forall st rv,
+        step st = (fun _ _ => inr rv)
+        -> low_final {|State := st;
+                       Op := None|} rv.
+
+    Inductive low_step : low_state -> label -> low_state -> Prop :=
+    | Low_Step : forall st e (a : args e) (r : rets e) next op,
+        @step st e = (fun r => inl (next r, op r))
+        -> low_step {|State := st; Op := Some (existT e a)|}
+                    {|Args := a; Rets := r|}
+                    {|State := next r; Op := op r|}.
+
+    (** ** Bisimulation defined *)
+
+    Record bisimulation (R : high_state -> low_state -> Prop) := {
+      FinalEquiv : forall high low, R high low
+        -> forall r, high_final high r <-> low_final low r;
+      HighSteps : forall high low, R high low
+        -> forall l high', high_step high l high'
+        -> exists low', low_step low l low' /\ R high' low';
+      LowSteps : forall high low, R high low
+        -> forall l low', low_step low l low'
+        -> exists high', high_step high l high' /\ R high' low'
+    }.
+
+    Definition bisimulate (high : high_state) (low : low_state) :=
+      exists R, bisimulation R /\ R high low.
+
+    (** * Bisimulation implies our equivalence *)
+
+    Hypothesis all_effects_possible : forall e, exists r : rets e, True.
+
+    Ltac invert H := inversion H; clear H; subst; simpl in *;
+                     repeat match goal with
+                            | [ H : ?X = ?X |- _ ] => clear H
+                            | [ H : existT ?E _ = existT ?E _ |- _ ] => apply inj_pairT2 in H; subst; simpl in *
+                            end.
+
+    Lemma bisimulation_equiv' : forall R, bisimulation R
+      -> forall high low, R high low
+      -> equiv' step (fun s op o => (step s = fun _ _ => inr o) /\ op = None)
+                low.(State) high low.(Op).
+    Proof.
+      induction high; intros.
+
+      {
+        destruct (all_effects_possible e) as [r0 _].
+        assert (high_step (Eff a t0) {|Args := a; Rets := r0|} (t0 r0)) by constructor.
+        eapply HighSteps in H2; try eassumption.
+        destruct H2 as [low'0 [Hstep0 HR0]].
+        invert Hstep0.
+        clear HR0.
+        apply Equiv'Eff with next op.
+        2: {
+          intro.
+          simpl.
+          rewrite H7.
+          reflexivity.
+        }
+        {
+          intro.
+          assert (high_step (Eff a t0) {|Args := a; Rets := r|} (t0 r)) by constructor.
+          eapply HighSteps in H2; try eassumption.
+          destruct H2 as [low' [Hstep HR]].
+          invert Hstep.
+          specialize (H0 _ _ HR); simpl in H0.
+          replace next with next0.
+          replace op with op0.
+          assumption.
+          {
+            extensionality r''.
+            rewrite H7 in H9.
+            pose proof (@f_equal _ _ (fun f => f r'') _ _ H9) as Heq.
+            simpl in Heq.
+            congruence.
+          }
+          {
+            extensionality r''.
+            rewrite H7 in H9.
+            pose proof (@f_equal _ _ (fun f => f r'') _ _ H9) as Heq.
+            simpl in Heq.
+            congruence.
+          }
+        }
+      }
+
+      {
+        assert (low_final low r).
+        {
+          eapply FinalEquiv; eauto.
+          constructor.
+        }
+        invert H1.
+        simpl.
+        constructor.
+        tauto.
+      }
+    Qed.
+      
+    Theorem bisimulate_equiv : forall init low op, step init = (fun _ _ => inl (low, op))
+      -> forall high, bisimulate high {|State := low; Op := op|}
+      -> equiv step init high.
+    Proof.
+      destruct 2; intuition.
+      do 3 esplit.
+      eassumption.
+      eapply bisimulation_equiv' in H2; try assumption.
+    Qed.
+
+    Hypothesis an_effect : exists e : eff, True.
+    
+    Theorem equiv_bisimulate : forall init high, equiv step init high
+      -> exists low op, step init = (fun _ _ => inl (low, op))
+                        /\ bisimulate high {|State := low; Op := op|}.
+    Proof.
+      destruct 1 as [? [? []]].
+      do 3 esplit.
+      eassumption.
+      exists (fun high' low' => equiv' step
+                                       (fun s op o => (step s = fun _ _ => inr o) /\ op = None)
+                                       low'.(State) high' low'.(Op)); split; try assumption.
+      clear init high x x0 H H0; split.
+
+      {
+        intuition.
+        {
+          invert H0.
+          invert H.
+          destruct low; simpl in *.
+          intuition subst.
+          constructor.
+          assumption.
+        }
+        {
+          invert H0.
+          simpl in *.
+          invert H.
+          intuition.
+          rewrite H1 in H.
+          destruct an_effect as [e _].
+          destruct (all_effects_possible e) as [r0 _].
+          pose proof (@f_equal _ _ (fun f => f e r0) _ _ H) as Heq.
+          simpl in Heq.
+          invert Heq.
+          constructor.
+        }
+      }
+
+      {
+        intros.
+        invert H0.
+        invert H.
+        exists {|State := next r; Op := op r|}; simpl; split.
+        {
+          destruct low; simpl in *; subst.
+          econstructor.
+          extensionality r'.
+          auto.
+        }
+        {
+          auto.
+        }
+      }
+
+      {
+        intros.
+        invert H0.
+        invert H.
+        {
+          exists (p0 r); split.
+          {
+            constructor.
+          }
+          {
+            replace next with next0.
+            replace op with op0.
+            auto.
+            {
+              extensionality r''.
+              rewrite H1 in H6.
+              specialize (H6 r'').
+              congruence.
+            }
+            {
+              extensionality r''.
+              rewrite H1 in H6.
+              specialize (H6 r'').
+              congruence.
+            }
+          }
+        }
+        intuition congruence.
+      }
+    Qed.
+
+    Theorem equiv_is_bisimulate : forall init high,
+        equiv step init high
+        <-> (exists low op, step init = (fun _ _ => inl (low, op))
+                            /\ bisimulate high {|State := low; Op := op|}).
+    Proof.
+      intros; split; intros.
+      eauto using equiv_bisimulate.
+      destruct H as [? [? []]].
+      eauto using bisimulate_equiv.
+    Qed.
+  End bisimulation.
 End Effect.
 
 Arguments Return {_ _ _ _ } _.
