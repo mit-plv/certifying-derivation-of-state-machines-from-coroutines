@@ -1136,40 +1136,8 @@ Ltac derive_core env :=
         derive_core (fv, H)
       | intros; dest_step
       ]
-    | Return ?r =>
-      (eapply (Equiv'Return _ _ (inl r));
-       unfold sum_merge;
-       cbv beta iota;
-       split;
-       lazymatch goal with
-         |- _ ?x = _ =>
-         pattern_rhs x;
-         eapply eq_refl
-       | _ => eapply eq_refl
-       end)
-      ||
-      (let ptr := next_ptr in
-       eapply (Equiv'Return _ _ (ptr r));
-       unfold sum_merge;
-       cbv beta iota;
-       split;
-       lazymatch goal with
-         |- _ ?x = _ =>
-         pattern_rhs x;
-         eapply eq_refl
-       | _ => eapply eq_refl
-       end)
-      ||
-      (eapply Equiv'Return;
-       unfold sum_merge;
-       cbv beta iota;
-       split;
-       lazymatch goal with
-         |- _ ?x = _ =>
-         pattern_rhs x;
-         eapply eq_refl
-       | _ => eapply eq_refl
-       end)
+    | Return _ =>
+      idtac
     | bind ?c _ =>
       let fv := free_var prog env in
       eapply (derive_bind _ (fun _ => _) (fun _ => _));
@@ -1641,7 +1609,7 @@ Ltac get_step c :=
 Ltac derive_coro env :=
   lazymatch goal with
     |- _ ?step ?init _ =>
-    let u := open_constr:(inr (inl env)) in
+    let u := open_constr:(inl env) in
     unify init u
   end;
   let r := fresh in
@@ -1697,7 +1665,7 @@ Definition ex_coroutine_step :=
   projT1 (projT2 ex_coroutine_derive).
 
 Definition ex_coroutine_equiv k :
-  equiv_coro ex_coroutine_step (inr (inl (tt,k))) (ex_coroutine k) :=
+  equiv_coro ex_coroutine_step (inl (tt,k)) (ex_coroutine k) :=
   proj2_sig (projT2 (projT2 ex_coroutine_derive) k).
 
 Hint Resolve ex_coroutine_equiv : equivc.
@@ -1986,7 +1954,7 @@ Definition loop_ex (p : nat * nat)(n i : nat) : t args_effect rets_effect (optio
 Ltac derive' env :=
   lazymatch goal with
     |- equiv ?step ?init ?x =>
-    let u := open_constr:(inr (inl env)) in
+    let u := open_constr:(inl env) in
     simpl;
     unify init u;
     repeat eexists;
@@ -2066,7 +2034,7 @@ Defined.
 Ltac derive env :=
   lazymatch goal with
     |- equiv ?step ?init ?x =>
-    let u := open_constr:(inr (inl env)) in
+    let u := open_constr:(inl env) in
     unify init u;
     let H := fresh in
     assert (x = ltac:(let x' := eval red in x in
@@ -2314,7 +2282,7 @@ Defined.
 
 Definition echo_step := projT1 (projT2 echo_derive).
 
-Definition echo_equiv n : equiv_coro echo_step (inr (inl (tt,n))) (echo n) :=
+Definition echo_equiv n : equiv_coro echo_step (inl (tt,n)) (echo n) :=
   proj2_sig (projT2 (projT2 echo_derive) n).
 
 Hint Resolve echo_equiv : equivc.

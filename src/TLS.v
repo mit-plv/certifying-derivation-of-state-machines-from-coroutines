@@ -925,8 +925,7 @@ Parameter pskkey : option ByteString.
 Parameter checkCertVerify : PublicKey -> HashAndSignatureAlgorithm * Signature -> ByteString -> bool.
 
 Definition fl := 1000.
-Parameter wantClientCert : bool.
-Definition doHandshake (fuel:nat) (cch: CertificateChain)(pr: PrivateKey)(_: rets_tls)
+Definition doHandshake (fuel:nat) (cch: CertificateChain)(pr: PrivateKey)(wantClientCert : bool)(_: rets_tls)
   : t (const_yield args_tls) (const_yield rets_tls) (option unit) :=
   Def (fun al => _ <- yield Close $ (Alert_Fatal, al);
                  Return None) (fun alert =>
@@ -1169,10 +1168,12 @@ Definition doHandshake (fuel:nat) (cch: CertificateChain)(pr: PrivateKey)(_: ret
     alert DecryptError)
 .
 
+Parameter wantClientCert : bool.
+
 Definition doHandshake_derive :
   { state & { step &
               forall fuel certs priv,
-                { init | @equiv_coro _ _ _ _ _ state step init (doHandshake fuel certs priv) } } }.
+                { init | @equiv_coro _ _ _ _ _ state step init (doHandshake fuel certs priv wantClientCert) } } }.
 Proof.
   do 3 eexists.
 (*
@@ -1203,8 +1204,8 @@ Proof.
   Time Admitted.
 
 
-Axiom doHandshake_equiv : forall fuel certs keys,
-  equiv_coro doHandshake_step (inr (inl (tt,fuel,certs,keys))) (doHandshake fuel certs keys).
+Axiom doHandshake_equiv : forall fuel certs keys b,
+  equiv_coro doHandshake_step (inl (tt,fuel,certs,keys)) (doHandshake fuel certs keys b).
 
 (*
 Definition doHandshake_step := projT1 (projT2 doHandshake_derive).
@@ -1382,8 +1383,8 @@ Definition isCloseWith p :=
 
 Parameter hdProtocolType : Header -> CProtocolType.
 
-Definition readWrite fuel certs keys (_: rets_tls) : t (const_yield _) (const_yield rets_tls) (option String.string) :=
-  pipe (doHandshake fuel certs keys) (fun coro : coro_type doHandshake_step =>
+Definition readWrite fuel certs keys b(_: rets_tls) : t (const_yield _) (const_yield rets_tls) (option String.string) :=
+  pipe (doHandshake fuel certs keys b) (fun coro : coro_type doHandshake_step =>
   nat_rect_nondep
     (fun _ => Return None)
     (fun _ rec (ctx: option (Hash * Cipher * ByteString * nat) * option (Hash * Cipher * ByteString * nat) * option (RecvType * (ByteString * option (ByteString -> ParseResult (HandshakeType * ByteString)))) * ByteString * rets_tls * coro_type doHandshake_step) =>
@@ -1512,8 +1513,8 @@ Instance ternary_Inhabit3 (A B C:Set) `{ Inhabit C } : Inhabit (ternary A B C) :
 Opaque doHandshake_step.
 Definition readWrite_derive :
   { state & { step &
-              forall fuel certs priv,
-                { init | @equiv_coro _ _ _ _ _ state step init (readWrite fuel certs priv) } } }.
+              forall fuel certs priv b,
+                { init | @equiv_coro _ _ _ _ _ state step init (readWrite fuel certs priv b) } } }.
 Proof.
   do 3 eexists.
   
@@ -1522,7 +1523,7 @@ Proof.
   end.
   unfold decode.
   intros.
-  Time unshelve derive (tt,fuel,certs,priv); intros; exact inhabitant.
+  Time unshelve derive (tt,fuel,certs,priv,b); intros; exact inhabitant.
   lazymatch goal with
     |- @equiv_coro _ _ _ _ _ ?state ?step _ _ =>
     assert Set;
@@ -1563,8 +1564,8 @@ Notation "r <- ef a ; p" :=
 Definition readWrite_step :=
   projT1 (projT2 readWrite_derive).
 *)
-Axiom readWrite_equiv : forall fuel certs keys,
-  equiv_coro readWrite_step (inl (tt,fuel,certs,keys)) (readWrite fuel certs keys b) (*:=
+Axiom readWrite_equiv : forall fuel certs keys b,
+  equiv_coro readWrite_step (inl (tt,fuel,certs,keys,b)) (readWrite fuel certs keys b) (*:=
   proj2_sig (projT2 (projT2 readWrite_derive) fuel certs keys)*).
 
 Hint Resolve readWrite_equiv : equivc.
@@ -1631,7 +1632,7 @@ Opaque readWrite_step.
 
 Definition Start := recvPacket RCCS.
 
-Definition main_loop fuel fuel' fuel'' certs keys :=
+Definition main_loop fuel fuel' fuel'' certs keys b :=
   nat_rect_nondep
     (fun _ => Return (@None unit))
     (fun _ rec maps =>
@@ -1639,7 +1640,7 @@ Definition main_loop fuel fuel' fuel'' certs keys :=
        osa <- accept tt;
          match osa with
          | Some sa =>
-           pipe (readWrite fuel' certs keys : coro_type readWrite_step)
+           pipe (readWrite fuel' certs keys b : coro_type readWrite_step)
                 (fun c =>
 (*                   ef <- resume c $ inhabitant;*)
                    _ <- perform (sa, Start);
@@ -1751,11 +1752,11 @@ Instance SessionData_Inhabit : Inhabit SessionData :=
   { inhabitant := sd_dummy }.
 
 Definition main_loop_derive  :
-  { state & { step & forall fuel fuel' fuel'' certs keys,
-                { init | @equiv _ _ _ _ state step init (main_loop fuel fuel' fuel'' certs keys) } } }.
+  { state & { step & forall fuel fuel' fuel'' certs keys b,
+                { init | @equiv _ _ _ _ state step init (main_loop fuel fuel' fuel'' certs keys b) } } }.
 Proof.
   do 3 eexists.
-  Time derive (tt,fuel,fuel',fuel'',certs,keys).
+  Time derive (tt,fuel,fuel',fuel'',certs,keys,b).
   Grab Existential Variables.
   all: intros; exact inhabitant.
 Time Defined.
