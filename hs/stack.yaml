@@ -1,0 +1,4 @@
+resolver: lts-14.27
+packages:
+- .
+- tls-1.5.3
