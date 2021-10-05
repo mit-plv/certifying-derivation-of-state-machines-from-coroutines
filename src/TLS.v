@@ -111,7 +111,7 @@ Parameter KeyUpdate : Set.
 Parameter Certificate CertificateChain : Set.
 Parameter Signature : Set.
 
-Inductive RecvType := RFinished | RClientHello | RCertificate | RCertVerify | RAppData | RCCS.
+Inductive RecvType := RFinished | RClientHello | RAppData | RCCS.
 
 Scheme Equality for RecvType.
 
@@ -195,20 +195,6 @@ Definition clientHello (h : CHandshake) :=
 Definition finished (h : CHandshake) :=
   match h with
   | HFinished bs => Some bs
-  | _ => None
-  end.
-
-Definition certificate (h : CHandshake) :=
-  match h with
-  | HCertificate ctx cchain exts =>
-    Some (ctx, cchain, exts)
-  | _ => None
-  end.
-
-Definition certVerify (h :  CHandshake) :=
-  match h with
-  | HCertVerify hashsig sig =>
-    Some (hashsig, sig)
   | _ => None
   end.
 
@@ -448,8 +434,6 @@ Inductive rets_tls :=
 | FromGroupGetPubShared : option (GroupPublic * GroupKey) -> rets_tls
 | FromRecvClientHello : ByteString * ClientHelloMsg -> rets_tls
 | FromRecvFinished : ByteString -> rets_tls
-| FromRecvCertificate : ByteString * CertificateChain * list (list ExtensionRaw) -> rets_tls
-| FromRecvCertVerify : HashAndSignatureAlgorithm * Signature -> rets_tls
 | FromRecvCCS : rets_tls
 | FromRecvAppData : ByteString -> rets_tls
 | FromRecvData : ByteString -> rets_tls.
@@ -517,18 +501,6 @@ Definition fromRecvClientHello p :=
 Definition fromRecvFinished p :=
   match p with
   | FromRecvFinished a => Some a
-  | _ => None
-  end.
-
-Definition fromRecvCertificate p :=
-  match p with
-  | FromRecvCertificate a => Some a
-  | _ => None
-  end.
-
-Definition fromRecvCertVerify p :=
-  match p with
-  | FromRecvCertVerify a => Some a
   | _ => None
   end.
 
@@ -609,27 +581,6 @@ Notation "r <- 'yield' 'RecvFinished' ; p" :=
                                    (Return None) (retAlert r'))
                     (fromRecvFinished r')))
     (at level 100, right associativity).
-
-Notation "r <- 'yield' 'RecvCertificate' ; p" :=
-  (Eff yield (recvPacket RCertificate)
-       (fun r' => option_branch
-                    (fun r => p)
-                    (option_branch (fun al => Eff yield (closeWith al)
-                                                  (fun _ => Return None))
-                                   (Return None) (retAlert r'))
-                    (fromRecvCertificate r')))
-    (at level 100, right associativity).
-
-Notation "r <- 'yield' 'RecvCertVerify' ; p" :=
-  (Eff yield (recvPacket RCertVerify)
-       (fun r' => option_branch
-                    (fun r => p)
-                    (option_branch (fun al => Eff yield (closeWith al)
-                                                  (fun _ => Return None))
-                                   (Return None) (retAlert r'))
-                    (fromRecvCertVerify r')))
-    (at level 100, right associativity).
-
 
 Notation "r <- 'yield' 'RecvCCS' ; p" :=
   (Eff yield (recvPacket RCCS)
@@ -852,18 +803,6 @@ Definition isSome {A:Set} (o : option A) :=
 
 Parameter extensionEncode_KeyShareHRR : Group -> ByteString.
 Parameter extensionEncode_SupportedVersionsServerHello : Version -> ByteString.
-Parameter defaultHashSigs : list HashAndSignatureAlgorithm.
-Parameter extensionEncode_SignatureAlgorithms : list HashAndSignatureAlgorithm -> list ByteString.
-Parameter extensionRaw_SignatureAlgorithms : list ByteString -> list ExtensionRaw.
-Parameter isDigitalSignatureKey : PublicKey -> bool.
-Parameter versionCompatible : PublicKey -> Version -> bool.
-
-Definition checkDigitalSignatureKey pubKey :=
-  isDigitalSignatureKey pubKey && versionCompatible pubKey TLS13.
-
-Definition certRequest :=
-  let sigAlgs := extensionEncode_SignatureAlgorithms defaultHashSigs in
-  HCertRequest empty (extensionRaw_SignatureAlgorithms sigAlgs).
 
 Definition doHelloRetryRequest chEncoded' ch hash cipher
   : t (const_yield args_tls) (const_yield rets_tls) (option (list ByteString * ClientHelloMsg * KeyShare)) :=
@@ -922,10 +861,8 @@ Fixpoint clientKeySharesValid ks gs :=
 Parameter extension_SupportedGroups : list ExtensionRaw -> option (list Group).
 Parameter pskkey : option ByteString.
 
-Parameter checkCertVerify : PublicKey -> HashAndSignatureAlgorithm * Signature -> ByteString -> bool.
-
 Definition fl := 1000.
-Definition doHandshake (fuel:nat) (cch: CertificateChain)(pr: PrivateKey)(wantClientCert : bool)(_: rets_tls)
+Definition doHandshake (fuel:nat) (cch: CertificateChain)(pr: PrivateKey)(_: rets_tls)
   : t (const_yield args_tls) (const_yield rets_tls) (option unit) :=
   Def (fun al => _ <- yield Close $ (Alert_Fatal, al);
                  Return None) (fun alert =>
@@ -1023,6 +960,18 @@ Definition doHandshake (fuel:nat) (cch: CertificateChain)(pr: PrivateKey)(wantCl
               pubhs <~ ifSome decideCredInfo pr certs hashSigs
                 {{ _ <- yield Close $ (Alert_Fatal, HandshakeFailure); Return None }}
               Return (Some pubhs);
+  (*
+  ohashSigs <<- _ <~ ifSome binderInfo
+            {{ bs <~ ifSome extensionLookup_SignatureAlgorithms chExts
+                  {{ _ <- yield Close $ (Alert_Fatal, MissingExtension);
+                     Return None }}
+               hashSigs <~ ifSome extensionDecode_SignatureAlgorithms bs
+                 {{ _ <- yield Close $ (Alert_Fatal, DecodeError); Return None }}
+               pubhs <~ ifSome decideCredInfo pr certs hashSigs
+                 {{ _ <- yield Close $ (Alert_Fatal, HandshakeFailure); Return None }}
+               Return (Some pubhs)  }}
+            Return None;
+*)
   srand <- yield GetRandomBytes $ 32;
   shEncoded <- yield SendPacket $
             (PHandshake [HServerHello (SR srand) sess (cipherID cipher) extensions']);
@@ -1044,73 +993,34 @@ Definition doHandshake (fuel:nat) (cch: CertificateChain)(pr: PrivateKey)(wantCl
   extEncoded <- yield SendPacket $
              (PHandshake [HEncryptedExtensions eExts]);
   let sendCertAndVerify :=
-      let transcript := (transcript' ++ [shEncoded; extEncoded])%list in
-  
+      Let transcript := (transcript' ++ [shEncoded; extEncoded])%list in
       match ohashSigs with
       | None => Return (Some transcript)
       | Some pubhs =>
-        newtranscript <<-
-                      if wantClientCert then
-                        crEncoded <- yield SendPacket $ (PHandshake [certRequest]);
-                        Return (transcript ++ [crEncoded])%list
-                      else
-                        Return transcript;
         let (pub,hashSig) := pubhs : PublicKey * HashAndSignatureAlgorithm in
         certEncoded <- yield SendPacket $
                     (PHandshake [HCertificate empty cch [[]]]);
-        let hashed := hashWith (cipherHash cipher) (newtranscript ++ [certEncoded]) in
+        let hashed := hashWith (cipherHash cipher) (transcript ++ [certEncoded]) in
         cv <- yield MakeCertVerify $ (pub,pr,hashSig,hashed);
         cvEncoded <- yield SendPacket $ (PHandshake [cv]);
-        Return (Some (newtranscript ++ [certEncoded; cvEncoded])%list)
+        Return (Some (transcript ++ [certEncoded; cvEncoded])%list)
       end
   in
   otranscript <<- sendCertAndVerify;
   transcript <~ ifSome otranscript {{ Return None }}
-
-  let notAuthenticated :=
-      match ohashSigs with
-      | None => true
-      | Some _ => false
-      end
-  in
+  
   let hashed' := hashWith usedHash transcript in
   finEncoded <- yield SendPacket $
              (PHandshake [HFinished (makeVerifyData usedHash serverHandshakeSecret hashed')]);
   Let tran := (transcript ++ [finEncoded])%list in
   sfSentTime <- yield GetCurrentTime $ tt;
-  let recvCertAndVerify :=
-      if notAuthenticated && wantClientCert then
-        ccert <- yield RecvCertificate;
-        ccertVerify <- yield RecvCertVerify;
-        match hd_error (getCertificates (snd (fst ccert))) with
-        | None =>
-          _ <- yield Close $ (Alert_Fatal, InternalError);
-          Return None
-        | Some c =>
-          let pubKey := certPubKey c in
-          if checkDigitalSignatureKey pubKey then
-            let hashval := hashWith (tran ++ [encodeHandshake13 (HCertificate (fst (fst ccert)) (snd (fst ccert)) (snd ccert))]) in
-            if checkCertVerify pubKey ccertVerify hashval then
-              Return (Some (tran ++ [encodeHandshake13 (HCertificate (fst (fst ccert)) (snd (fst ccert)) (snd ccert)); encodeHandshake13 (HCertVerify (fst ccertVerify) (snd ccertVerify))])%list)
-            else
-             _ <- yield Close $ (Alert_Fatal, DecryptError);
-              Return None
-          else
-            _ <- yield Close $ (Alert_Fatal, HandshakeFailure);
-            Return None
-        end
-      else
-        Return (Some tran)
-  in
   let hashed'' := hashWith usedHash tran in
   let applicationSecret := hkdfExtract usedHash (hkdfExpandLabel usedHash handshakeSecret (s2b "derived") (hashWith usedHash [s2b ""]) hsize) zero in
   let clientApplicationSecret := hkdfExpandLabel usedHash applicationSecret (s2b "c ap traffic") hashed'' hsize in
   let serverApplicationSecret := hkdfExpandLabel usedHash applicationSecret (s2b "s ap traffic") hashed'' hsize in
   _ <- yield SetSecret $ (usedHash, cipher, serverApplicationSecret, false);
-  _ <- yield SetSecret $ (usedHash, cipher, clientHandshakeSecret, true);
 
-  otran <<- recvCertAndVerify;
-  tran <~ ifSome otran' {{ Return None }}
+  _ <- yield SetSecret $ (usedHash, cipher, clientHandshakeSecret, true);
   fin <- yield RecvFinished;
   cfRecvTime <- yield GetCurrentTime $ tt;
 
@@ -1168,12 +1078,10 @@ Definition doHandshake (fuel:nat) (cch: CertificateChain)(pr: PrivateKey)(wantCl
     alert DecryptError)
 .
 
-Parameter wantClientCert : bool.
-
 Definition doHandshake_derive :
   { state & { step &
               forall fuel certs priv,
-                { init | @equiv_coro _ _ _ _ _ state step init (doHandshake fuel certs priv wantClientCert) } } }.
+                { init | @equiv_coro _ _ _ _ _ state step init (doHandshake fuel certs priv) } } }.
 Proof.
   do 3 eexists.
 (*
@@ -1305,23 +1213,7 @@ Definition decode boCont header bs (s:RecvType) o : t (const_yield args_tls) (co
                   else
                     Return (Some (inr (RetAlert (Alert_Fatal, UnexpectedMessage))))
                 | None =>
-                  match certificate h with
-                  | Some p =>
-                    if RecvType_beq s RCertificate then
-                      Return (Some (inr (FromRecvCertificate p)))
-                    else
-                      Return (Some (inr (RetAlert (Alert_Fatal, UnexpectedMessage))))
-                  | None =>
-                    match certVerify h with
-                    | Some p =>
-                      if RecvType_beq s RCertVerify then
-                        Return (Some (inr (FromRecvCertVerify p)))
-                      else
-                        Return (Some (inr (RetAlert (Alert_Fatal, UnexpectedMessage))))
-                    | None =>
-                      Return (Some (inr (RetAlert (Alert_Fatal, UnexpectedMessage))))
-                    end
-                  end
+                  Return (Some (inr (RetAlert (Alert_Fatal, UnexpectedMessage))))
                 end
               end
             end
