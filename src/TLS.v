@@ -20,15 +20,6 @@ Parameter ExtensionRaw : Set.
 Parameter Session : Set.
 Parameter CipherID : Set.
 Parameter Version : Set.
-
-(*
-Record ClientHelloMsg :=
-  {
-    chSession : Session;
-    chExtension : list ExtensionRaw;
-    chCiphers : list CipherID
-  }.
-*)
 Parameter serverGroups : list Group.
 
 Fixpoint findKeyShare ks gs :=
@@ -129,10 +120,6 @@ Inductive CHandshake :=
 | HCertVerify : HashAndSignatureAlgorithm -> Signature -> CHandshake
 | HFinished : ByteString -> CHandshake
 | HKeyUpdate : KeyUpdate -> CHandshake.
-(*
-Definition  CPacket :=
-  list CHandshake + unit + ByteString.
- *)
 
 Inductive AlertLevel := Alert_Warning | Alert_Fatal.
 
@@ -224,18 +211,6 @@ Definition appData (p : CPacket) :=
 
 Parameter decodePacket : option (Hash * Cipher * ByteString * nat) -> ByteString -> option CPacket.
 
-
-(*
-Inductive eff_tls :=
-| recvClientHello : eff_tls
-| recvFinished : option (Hash * Cipher * ByteString) -> eff_tls
-| recvCCS : eff_tls
-| recvAppData : option (Hash * Cipher * ByteString) -> eff_tls
-| getRandomBytes : nat -> eff_tls
-| sendPacket : Packet13 * option (Hash * Cipher * ByteString * nat) -> eff_tls
-| groupGetPubShared : GroupPublic -> eff_tls
-| makeCertVerify : PublicKey * PrivateKey * HashAndSignatureAlgorithm * ByteString -> eff_tls.
-*)
 
 Definition option_beq {A} (A_beq : A -> A -> bool) o1 o2 :=
   match o1, o2 with
@@ -392,22 +367,6 @@ Record SessionData :=
     sessionFlags : list SessionFlag
   }.
 
-(*
-Definition args_tls :=
-  String.string * SessionData (* SetPSK *)
-  + String.string (* SessionResume *)
-  + unit (* GetCurrentTime *)
-  + unit (* Close *)
-  + CPacket * option (Hash * Cipher * ByteString * nat) (* SendPacket *)
-  + nat (* GetRandomBytes *)
-  + unit (* RecvData *)
-  + GroupPublic (* GroupGetPubShared *)
-  + PublicKey * PrivateKey * HashAndSignatureAlgorithm * ByteString (* MakeCertVerify *)
-  + Hash * Cipher * ByteString * bool (* SetSecret *)
-  + CPacket (* Send *)
-  + (unit + unit + unit + unit). (* Recv *)
- *)
-
 Inductive args_tls :=
 | setPSK : String.string * SessionData -> args_tls
 | sessionResume : String.string -> args_tls
@@ -522,15 +481,6 @@ Definition fromRecvData p :=
   | _ => None
   end.
 
-(*
-Definition rets_tls :=
-  option SessionData
-  + option (GroupPublic * GroupKey)
-  + CHandshake
-  + ByteString
-  + unit
-  + (AlertLevel * AlertDescription + ByteString * ClientHelloMsg).
- *)
 
 Notation "r <- 'yield' 'SetPSK' $ a ; p" :=
   (Eff yield (setPSK a)
@@ -637,14 +587,6 @@ Instance sigT_args_inhabit : Inhabit args_tls :=
 Parameter ProtocolType : Set.
 Parameter Header : Set.
 Parameter hdReadLen : Header -> nat.
-(*
-Inductive Header := header : ProtocolType -> Version -> nat -> Header.
-
-Definition hdReadLen hd :=
-  match hd with
-  | header _ _ n => n
-  end.
- *)
 
 Parameter Bsplit :  nat -> ByteString -> ByteString * ByteString.
 
@@ -960,18 +902,7 @@ Definition doHandshake (fuel:nat) (cch: CertificateChain)(pr: PrivateKey)(_: ret
               pubhs <~ ifSome decideCredInfo pr certs hashSigs
                 {{ _ <- yield Close $ (Alert_Fatal, HandshakeFailure); Return None }}
               Return (Some pubhs);
-  (*
-  ohashSigs <<- _ <~ ifSome binderInfo
-            {{ bs <~ ifSome extensionLookup_SignatureAlgorithms chExts
-                  {{ _ <- yield Close $ (Alert_Fatal, MissingExtension);
-                     Return None }}
-               hashSigs <~ ifSome extensionDecode_SignatureAlgorithms bs
-                 {{ _ <- yield Close $ (Alert_Fatal, DecodeError); Return None }}
-               pubhs <~ ifSome decideCredInfo pr certs hashSigs
-                 {{ _ <- yield Close $ (Alert_Fatal, HandshakeFailure); Return None }}
-               Return (Some pubhs)  }}
-            Return None;
-*)
+
   srand <- yield GetRandomBytes $ 32;
   shEncoded <- yield SendPacket $
             (PHandshake [HServerHello (SR srand) sess (cipherID cipher) extensions']);
@@ -1056,16 +987,7 @@ Definition doHandshake (fuel:nat) (cch: CertificateChain)(pr: PrivateKey)(_: ret
                             sessionFlags := []
                          |});
                  _ <- yield SendPacket $ pac;
-                 (*
-    data <- yield RecvAppData;
-    x <- yield SendPacket $ (PAppData (mconcat ([s2b ("HTTP/1.1 200 OK" ++ CR ++ LF ++ "Content-Type: text/plain" ++ CR ++ LF ++ CR ++ LF ++ "Hello, "); data; s2b ("!" ++ CR ++ LF)])));
-    _ <- yield Close $ (Alert_Warning, CloseNotify); Return None
-*)
-      (*
-    _ <- yield SendPacket $ pac;
-    _ <- yield Close $ tt;
-    Return tt
-*)
+
     nat_rect_nondep
       (fun _ => _ <- yield Close $ (Alert_Warning, CloseNotify); Return None)
       (fun _ rec _ =>
@@ -1084,12 +1006,12 @@ Definition doHandshake_derive :
                 { init | @equiv_coro _ _ _ _ _ state step init (doHandshake fuel certs priv) } } }.
 Proof.
   do 3 eexists.
-(*
+
   unfold doHandshake.
   intros.
   Time unshelve derive_coro (tt,fuel,certs,priv); intros; exact inhabitant.
   Time Defined.
-*)
+(*
   lazymatch goal with
     |- ?x => assert x
   end.
@@ -1114,14 +1036,14 @@ Proof.
 
 Axiom doHandshake_equiv : forall fuel certs keys,
   equiv_coro doHandshake_step (inl (tt,fuel,certs,keys)) (doHandshake fuel certs keys).
+*)
 
-(*
 Definition doHandshake_step := projT1 (projT2 doHandshake_derive).
 
 Definition doHandshake_equiv fuel certs keys :
   equiv_coro doHandshake_step (inl (tt,fuel,certs,keys)) (doHandshake fuel certs keys) :=
   proj2_sig (projT2 (projT2 doHandshake_derive) fuel certs keys).
-*)
+
 
 Hint Resolve doHandshake_equiv : equivc.
 
@@ -1236,18 +1158,6 @@ Definition decode boCont header bs (s:RecvType) o : t (const_yield args_tls) (co
   end.
 
 Parameter maxCiphertextSize maxPlaintextSize : nat.
-
-(*
-Notation "r <- 'yield' 'RecvData_' $ a ; p" :=
-  (Eff yield (inl (inl (inl (inl (inl (inr a))))))
-       (fun r' => option_branch
-                    (fun r => p)
-                    (option_branch (fun al => Eff yield (inl (inr (PAlert [al])))
-                                                  (fun _ => Return inhabitant))
-                                   (Return inhabitant) (retAlert r'))
-                    (fromRecvData r')))
-    (at level 100, right associativity).
-*)
 
 Definition isRecvPacket p :=
   match p with
@@ -1409,7 +1319,7 @@ Definition readWrite_derive :
                 { init | @equiv_coro _ _ _ _ _ state step init (readWrite fuel certs priv) } } }.
 Proof.
   do 3 eexists.
-  
+  (*
   lazymatch goal with
     |- ?x => assert x
   end.
@@ -1425,11 +1335,12 @@ Proof.
   end.
   transparent_abstract (exact stp) using readWrite_step.
   Time Admitted.
-(*
+*)
+
   unfold decode.
   unshelve derive (tt,fuel,certs,priv); intros; exact inhabitant.
 Time Defined.
-*)
+
 Inductive eff_conn := accept | perform | receive | skip.
 
 
@@ -1452,13 +1363,14 @@ Definition rets_conn (e : eff_conn) :=
 Notation "r <- ef a ; p" :=
   (@Eff eff_conn args_conn rets_conn _ ef a (fun r => p))
     (at level 100, ef at level 0, right associativity).
-(*
+
 Definition readWrite_step :=
   projT1 (projT2 readWrite_derive).
-*)
-Axiom readWrite_equiv : forall fuel certs keys,
-  equiv_coro readWrite_step (inl (tt,fuel,certs,keys)) (readWrite fuel certs keys) (*:=
-  proj2_sig (projT2 (projT2 readWrite_derive) fuel certs keys)*).
+
+
+Definition readWrite_equiv fuel certs keys :
+  equiv_coro readWrite_step (inl (tt,fuel,certs,keys)) (readWrite fuel certs keys) :=
+  proj2_sig (projT2 (projT2 readWrite_derive) fuel certs keys).
 
 Hint Resolve readWrite_equiv : equivc.
 
@@ -1534,7 +1446,7 @@ Definition main_loop fuel fuel' fuel'' certs keys :=
          | Some sa =>
            pipe (readWrite fuel' certs keys : coro_type readWrite_step)
                 (fun c =>
-(*                   ef <- resume c $ inhabitant;*)
+
                    _ <- perform (sa, Start);
                    let coros' := insert sa c coros in
                    rec (m, coros'))
