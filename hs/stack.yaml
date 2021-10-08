@@ -2,3 +2,7 @@ resolver: lts-14.27
 packages:
 - .
 - tls-1.5.3
+extra-deps:
+- memory-0.15.0
+- optparse-applicative-0.15.0.0
+- primitive-0.7.1.0

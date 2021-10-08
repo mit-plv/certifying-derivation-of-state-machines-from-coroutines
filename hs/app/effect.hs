@@ -27,8 +27,8 @@ main :: IO ()
 main = withSocketsDo $ do
   args <- getArgs
   ecred <- credentialLoadX509 (args !! 0) (args !! 1)
-  --newAccepts <- newIORef []
-  newAccepts <- newEmptyMVar
+  newAccepts <- newIORef []
+  --newAccepts <- newEmptyMVar
   received <- newEmptyMVar
   case ecred of
     Right (cert,priv) -> do
@@ -38,15 +38,15 @@ main = withSocketsDo $ do
       forkIO (core Map.empty (Left ((((((),1000000), 1000000), 1000000), cert), priv)) Receive (unsafeCoerce ()) newAccepts received)
       forever $ do
         (s,a) <- accept sock
-        ac <- tryTakeMVar newAccepts
-        case ac of
-          Nothing ->
-            putMVar newAccepts (Left (s, show a))
-          Just ac' -> do
-            putMVar newAccepts (Left (s, show a))
-            putStrLn (show a)
-            putMVar newAccepts ac'
---        modifyIORef newAccepts $ \l -> (s,show a):l
+        --ac <- tryTakeMVar newAccepts
+        --case ac of
+        --  Nothing ->
+        --    putMVar newAccepts (Left (s, show a))
+        --  Just ac' -> do
+        --    putMVar newAccepts (Left (s, show a))
+        --    putStrLn (show a)
+        --    putMVar newAccepts ac'
+        modifyIORef newAccepts $ \l -> (s,show a):l
     Left s ->
       putStrLn s
 
@@ -62,28 +62,28 @@ core sock x ef (r::Any) newAccepts received = do
         Skip -> do
           core sock next Skip (unsafeCoerce ()) newAccepts received
         Accept -> do
-          l <- takeMVar newAccepts
+--          l <- takeMVar newAccepts
+--          case l of
+--            Left (s,adr) -> do
+----              putStrLn $ " accepted" ++ show adr
+--              x <- randomRIO (0,9) :: IO Int
+--              let adr' = show x ++ take 2 (reverse adr)
+--              core (Map.insert adr' s sock) next Accept (unsafeCoerce (Just adr')) newAccepts received
+--            Right r -> do
+--              forkIO $ putMVar received r
+--              core sock next Accept (unsafeCoerce Nothing) newAccepts received
+          l <- readIORef newAccepts
           case l of
-            Left (s,adr) -> do
---              putStrLn $ " accepted" ++ show adr
-              x <- randomRIO (0,9) :: IO Int
-              let adr' = show x ++ take 2 (reverse adr)
-              core (Map.insert adr' s sock) next Accept (unsafeCoerce (Just adr')) newAccepts received
-            Right r -> do
-              forkIO $ putMVar received r
-              core sock next Accept (unsafeCoerce Nothing) newAccepts received
-          --l <- readIORef newAccepts
-          --case l of
-          --  [] -> threadDelay 10000 >> core sock next Accept (unsafeCoerce Nothing) newAccepts received 
-          --  (s,adr):l' -> do
-          --    writeIORef newAccepts l'
-          --    putStrLn $ " accepted" ++ show adr
-          --    core ((adr,s):sock) next Accept (unsafeCoerce (Just adr)) newAccepts received 
+            [] -> threadDelay 10000 >> core sock next Accept (unsafeCoerce Nothing) newAccepts received 
+            (s,adr):l' -> do
+              writeIORef newAccepts l'
+              --putStrLn $ " accepted" ++ show adr
+              core (Map.insert adr s sock) next Accept (unsafeCoerce (Just adr)) newAccepts received 
         Receive -> do
-          r <- takeMVar received
+          r <- tryTakeMVar received
           case r of
-            (adr,p) ->
-              core sock next Receive (unsafeCoerce (Just r)) newAccepts received
+            Just (adr,p) ->
+              core sock next Receive (unsafeCoerce r) newAccepts received
               --case Map.lookup adr sock of
               --  Just _ -> do
               --    --putStrLn $ " received " ++ show adr
@@ -91,14 +91,15 @@ core sock x ef (r::Any) newAccepts received = do
               --  Nothing -> do
               --    --putStrLn $ " received but not found " ++ show adr
               --    core sock next Receive (unsafeCoerce Nothing) newAccepts received
-            --Nothing -> core sock next Receive (unsafeCoerce Nothing) newAccepts received 
+            Nothing -> core sock next Receive (unsafeCoerce Nothing) newAccepts received 
         Perform -> do
           let (adr,ea) = unsafeCoerce a :: (String, Args_tls)
           --putStrLn $ " perform " ++ show adr
           case ea of
             RecvPacket _ -> do
               --putStrLn "Start"
-              forkIO (putMVar newAccepts (Right (adr, FromSetPSK)))
+              --forkIO (putMVar newAccepts (Right (adr, FromSetPSK)))
+              forkIO $ putMVar received (adr, FromSetPSK)
               core sock next Perform (unsafeCoerce FromSetPSK) newAccepts received
             RecvData a' -> do
               --putStrLn "RecvData"
@@ -108,7 +109,8 @@ core sock x ef (r::Any) newAccepts received = do
               forkIO $ do
                 ch <- SB.recv s (16384 + 256)
                 --putStrLn $ show $ toLazyByteString $ byteStringHex ch
-                putMVar newAccepts (Right (adr, FromRecvData ch))
+                --putMVar newAccepts (Right (adr, FromRecvData ch))
+                putMVar received (adr, FromRecvData ch)
               return ()
               --  Nothing -> error "no socket"
               core sock next Perform (unsafeCoerce FromSetPSK) newAccepts received
