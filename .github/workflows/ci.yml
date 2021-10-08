@@ -12,9 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
-      - name: stack
-        run: curl -sSL https://get.haskellstack.org/ | sh
-      - name: build
+      - name: stack-build-coroutines-server
         run: |
           cd hs
           stack build
