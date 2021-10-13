@@ -3,6 +3,7 @@
 import System.Environment
 import Control.Monad
 import Control.Concurrent
+import Control.Exception
 import Data.IORef
 import Data.List
 import System.Random
@@ -106,7 +107,7 @@ core sock x ef (r::Any) newAccepts received = do
               let s = sock Map.! adr
               --case lookup adr sock of
                 --Just s -> do
-              forkIO $ do
+              flip forkFinally (\_ -> return ()) $ do
                 ch <- SB.recv s (16384 + 256)
                 --putStrLn $ show $ toLazyByteString $ byteStringHex ch
                 --putMVar newAccepts (Right (adr, FromRecvData ch))
@@ -114,6 +115,7 @@ core sock x ef (r::Any) newAccepts received = do
               return ()
               --  Nothing -> error "no socket"
               core sock next Perform (unsafeCoerce FromSetPSK) newAccepts received
+             `catch` (\(SomeException e) -> return ())
             GetRandomBytes a' -> do
               --putStrLn (if a' == 0 then "Skip" else "GetRandomBytes")
               v <- if a' == 0 then return "" else getRandomBytes a'
