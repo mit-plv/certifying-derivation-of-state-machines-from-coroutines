@@ -112,10 +112,8 @@ core sock x ef (r::Any) newAccepts received = do
                 --putStrLn $ show $ toLazyByteString $ byteStringHex ch
                 --putMVar newAccepts (Right (adr, FromRecvData ch))
                 putMVar received (adr, FromRecvData ch)
-              return ()
               --  Nothing -> error "no socket"
               core sock next Perform (unsafeCoerce FromSetPSK) newAccepts received
-             `catch` (\(SomeException e) -> return ())
             GetRandomBytes a' -> do
               --putStrLn (if a' == 0 then "Skip" else "GetRandomBytes")
               v <- if a' == 0 then return "" else getRandomBytes a'
