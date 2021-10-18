@@ -1095,6 +1095,7 @@ Qed.
 
 Definition Def {A B : Set} (a : A)(f : A -> B) := f a.
 
+
 Ltac derive_core env :=
   st_op_to_ev;[
     (solve [repeat match goal with
@@ -1882,7 +1883,7 @@ Ltac dest_match :=
 Notation "'let_coro' x := c 'in' p" :=
   (pipe (c : coro_type ltac:(let step := get_step c in exact step))
         (fun x => p))
-    (at level 200, only parsing).
+    (at level 200, only parsing, right associativity).
 
 Ltac mid_eq_core :=
   discriminate
@@ -2424,3 +2425,6 @@ Proof.
   unfold echo_loop.
   unshelve derive_coro (tt,fuel,name); intros; exact inhabitant.
 Defined.
+
+Notation "'let_coro' x : t := c 'in' p" :=
+  (pipe c (fun x : t => p)) (at level 200, x ident, right associativity).
