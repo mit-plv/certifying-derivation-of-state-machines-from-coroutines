@@ -93,7 +93,10 @@ We have four states for this state machine, and [inl tt] is the initial state. P
 
 Eval cbv [ex1_derive projT1 projT2 sum_merge prod_curry lift_my_eff] in projT1 (projT2 ex1_derive).
 
-(** The first branch
+(**
+In the paper, we described a step function in more human readable like [add_coro] in Section 2, and this is the actual compiler's output.
+
+The first branch
 [[[
        | inl _ =>
            fun (e : my_eff) (_ : rets_my_eff e) => inl (inr (inl tt), Some (existT GetRand tt))
@@ -117,6 +120,8 @@ The second branch
 looks a little complicated, but it means: At the state [inr (inl _)], if the previous effectful operation [e0] is [GetRand] and its result is [r], then go to the state [inr (inr (inl (tt, r)))].
 If [e0] is [PutNum] (this is not supposed to be happened), go to the final state [inr None].
 We can interpret the other branches in the same way.
+
+
 *)
 
 
@@ -144,6 +149,8 @@ Lemma coro_add_derive :
   unshelve derive_coro (tt, n); exact inhabitant.
   (* We pair parameters (in this case, [n]) of a program with [tt], and pass to [derive_coro] *)
 Defined.
+
+(** Then we have a step function. This corresponds to `ex_coro'` in the paper. *)
 
 Definition coro_add_step :=
   projT1 (projT2 coro_add_derive).
