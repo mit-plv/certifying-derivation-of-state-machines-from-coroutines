@@ -1275,7 +1275,7 @@ Ltac get_init c :=
   | ?B -> t (const_yield ?A) (const_yield _) ?C =>
     let init := open_constr:(_) in
     let step := open_constr:(_) in
-  let _ := constr:(ltac:(auto with equivc) : @equiv_coro A B C _ _ _ step init c) in
+  let _ := constr:(ltac:(auto with equivc || eauto with equivc) : @equiv_coro A B C _ _ _ step init c) in
   init
   end.
 

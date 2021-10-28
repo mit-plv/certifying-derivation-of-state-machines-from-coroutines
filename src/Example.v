@@ -84,9 +84,41 @@ Proof.
   derive' tt. (* The argument [tt] means that [ex1] has no parameters. *)
 Defined.
 
-(** Print the compiled step function: *)
+(** We can print the type of states and the initial state. *)
+Eval cbv [ex1_derive projT1] in projT1 ex1_derive.
+Eval cbv [ex1_derive projT2 proj1_sig] in proj1_sig (projT2 (projT2 ex1_derive)).
 
-Eval cbv [ex1_derive projT1 projT2] in projT1 (projT2 ex1_derive).
+(** The type of states is given as a sum type, and each component is the type of a single state.
+We have four states for this state machine, and [inl tt] is the initial state. Print the compiled step function as well: *)
+
+Eval cbv [ex1_derive projT1 projT2 sum_merge prod_curry lift_my_eff] in projT1 (projT2 ex1_derive).
+
+(** The first branch
+[[[
+       | inl _ =>
+           fun (e : my_eff) (_ : rets_my_eff e) => inl (inr (inl tt), Some (existT GetRand tt))
+]]]
+describes the transition from the initial state [inl _] to the next state [inr (inl tt)] and the next operation to run is [GetRand tt].
+The second branch
+[[[
+       | inr (inl _) =>
+           fun e0 : my_eff =>
+           match
+             e0 as e1
+             return
+               (rets_my_eff e1 ->
+                (unit + (unit + (unit * nat + option unit))) *
+                option {e : my_eff & args_my_eff e} + option unit)
+           with
+           | GetRand => fun r : nat => inl (inr (inr (inl (tt, r))), Some (existT PutNum r))
+           | PutNum => fun _ : rets_my_eff PutNum => inr None
+           end
+]]]
+looks a little complicated, but it means: At the state [inr (inl _)], if the previous effectful operation [e0] is [GetRand] and its result is [r], then go to the state [inr (inr (inl (tt, r)))].
+If [e0] is [PutNum] (this is not supposed to be happened), go to the final state [inr None].
+We can interpret the other branches in the same way.
+*)
+
 
 (** Let's define a simple child coroutine. *)
 
@@ -116,6 +148,12 @@ Defined.
 Definition coro_add_step :=
   projT1 (projT2 coro_add_derive).
 
+(** We use the commands below to help our compiler. *)
+
+Definition coro_add_equiv n : equiv_coro coro_add_step (inl (tt, n)) (coro_add n) :=
+  proj2_sig (projT2 (projT2 coro_add_derive) n).
+Hint Resolve coro_add_equiv : equivc.
+
 (** Now let's define a simple parent: *)
 
 Definition ex2 : t args_my_eff rets_my_eff (option unit) :=
@@ -137,4 +175,4 @@ Proof.
   unshelve derive tt; exact inhabitant.
 Defined.
 
-Eval cbv [ex2_derive projT1 projT2] in projT1 (projT2 ex2_derive).
+Eval cbv [ex2_derive projT1 projT2 sum_merge prod_curry] in projT1 (projT2 ex2_derive).
