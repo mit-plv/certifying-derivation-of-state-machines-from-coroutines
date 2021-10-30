@@ -183,3 +183,27 @@ Proof.
 Defined.
 
 Eval cbv [ex2_derive projT1 projT2 sum_merge prod_curry] in projT1 (projT2 ex2_derive).
+
+
+(** Here is a parent with recursion. *)
+
+Definition ex3 (fuel : nat) : t args_my_eff rets_my_eff (option unit) :=
+  let_coro c : coro_type coro_add_step := coro_add 0 in
+  nat_rect_nondep
+    (fun _ => Return None)
+    (fun _ rec n_c =>
+       let (n, c) := n_c : nat * coro_type coro_add_step in
+       putNum n;
+       x <- resume c $ n;
+       rec (x, c)
+    )
+    fuel (0, c).
+
+(** Note that we pass the coroutine variable [c] to [nat_rect_nondep]. Otherwise, [resume] will invoke the first line of [coro_add] on every recursive call, and will never proceed to the next line (and our tactic does not expect such input). *)
+
+Lemma ex3_derive:
+  { state & { step & forall fuel, { init | @equiv _ _ _ _ state step init (ex3 fuel) } } }.
+Proof.
+  do 3 eexists.
+  unshelve derive (tt, fuel); exact inhabitant.
+Defined.
